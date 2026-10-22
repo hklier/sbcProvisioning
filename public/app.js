@@ -13,6 +13,34 @@ function showError(error) {
   $('errorDetails').textContent=JSON.stringify(detail,null,2);if(!$('errorDialog').open)$('errorDialog').showModal();
 }
 function el(tag,text,className) {const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;}
+function showSuccess(plan) {
+  $('successMessage').textContent=state.connection==='demo'?'Changes completed in Demo. No live SBC changes were made.':'All requested changes completed successfully.';
+  const summary=$('successSummary');summary.replaceChildren();
+  const labels={realmConfig:'realm',sipInterface:'SIP interface',sessionAgent:'session agent',sessionAgentGroup:'session group',localPolicy:'local policy'};
+  for(const config of plan.configurations || []) {
+    if(!config.operations.length)continue;
+    const device=state.devices.find(d=>d.id===config.deviceId);
+    summary.append(el('h3',`${device?.name || config.deviceId} (${config.deviceId})`,'count-heading'));
+    for(const op of config.operations) {
+      const object=op.body || op.before;
+      const key=object.attributes?.find(a=>['id','RealmID','hostname','name'].includes(a.name))?.value || 'customer policy';
+      const verb=op.path.endsWith('/delete')?'Deleted':op.path.endsWith('/add')?'Created':'Updated';
+      summary.append(el('div',`${verb} ${labels[object.elementTypePath] || object.elementTypePath} · ${key}`,'plan-step'));
+    }
+    summary.append(el('p','Configuration saved and activated.','help'));
+  }
+  if(plan.routes?.length) {
+    const set=state.routeSets.find(s=>String(s.routeSetId)===String(plan.routeSetId));
+    summary.append(el('h3',`LRT · ${set?.name || plan.routeSetId}`,'count-heading'));
+    for(const op of plan.routes) {
+      const row=op.body || op.before;
+      summary.append(el('div',`${op.method==='DELETE'?'Deleted':op.method==='PUT'?'Updated':'Added'} range · ${row.rangeStart} → ${row.rangeEnd}`,'plan-step'));
+    }
+    const targets=plan.deviceIds.map(id=>state.devices.find(d=>d.id===id)?.name || id).join(', ');
+    summary.append(el('p',`Routing table deployed and committed on ${targets}.`,'help'));
+  }
+  $('successDialog').showModal();
+}
 function notice(text,error=false) {$('notice').hidden=!text;$('notice').textContent=text;$('notice').className=error?'error':'';}
 function invalidate() {state.plan=null;$('previewCard').hidden=true;}
 function setBusy(value) {state.busy=value;document.body.classList.toggle('busy',value);$('busy').hidden=!value;document.querySelectorAll('button,input,select,textarea').forEach(n=>{if(value){n.dataset.previousDisabled=String(n.disabled);n.disabled=true;}else{n.disabled=n.dataset.previousDisabled==='true';delete n.dataset.previousDisabled;}});}
@@ -99,10 +127,11 @@ document.querySelectorAll('[data-view]').forEach(n=>n.addEventListener('click',(
 form.addEventListener('input',()=>{invalidate();updateDerived();});form.addEventListener('change',()=>{invalidate();updateDerived();});field('agentCount').addEventListener('change',renderAgents);
 $('device').addEventListener('change',invalidate);$('searchForm').addEventListener('input',invalidate);$('searchForm').addEventListener('change',invalidate);
 $('device2').addEventListener('change',invalidate);$('closeError').addEventListener('click',()=>$('errorDialog').close());
+$('closeSuccess').addEventListener('click',()=>$('successDialog').close());
 form.addEventListener('submit',action(async()=>showPlan(await run('preview',readInput()))));
 $('searchForm').addEventListener('submit',action(async()=>{invalidate();const input=Object.fromEntries(new FormData($('searchForm')));showResults(await run('search',{...input,mode:state.mode,deviceId:$('device').value}));}));
 $('previewDelete').addEventListener('click',action(async()=>{const input=Object.fromEntries(new FormData($('searchForm')));showPlan(await run('preview',{kind:'delete',mode:state.mode,deviceIds:selectedTargets(),filter:input.filter,numericId:input.numericId,scope:input.deleteScope,routeSetId:input.routeSetId,demoFailure:field('demoFailure').value}));}));
-$('applyPlan').addEventListener('click',action(async()=>{if(!state.plan)throw new Error('Generate a new preview');if(state.plan.kind==='delete' && !$('deleteConfirm').checked)throw new Error('Review the deletion preview and select the confirmation checkbox.');const planId=state.plan.id;invalidate();const result=await run('apply',{planId});notice(result.completed.join(' · '));}));
+$('applyPlan').addEventListener('click',action(async()=>{if(!state.plan)throw new Error('Generate a new preview');if(state.plan.kind==='delete' && !$('deleteConfirm').checked)throw new Error('Review the deletion preview and select the confirmation checkbox.');const plan=state.plan;invalidate();const result=await run('apply',{planId:plan.id});notice(result.completed.join(' · '));showSuccess(plan);}));
 $('discardPlan').addEventListener('click',invalidate);
 $('refresh').addEventListener('click',action(async()=>{invalidate();renderInventory(await run('inventory',{}));notice('Inventory refreshed.');}));
 $('connectionButton').addEventListener('click',()=>{$('connectionMode').value=state.connection;$('connectionDialog').showModal();});$('closeConnection').addEventListener('click',()=>$('connectionDialog').close());

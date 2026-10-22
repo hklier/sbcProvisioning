@@ -132,3 +132,5 @@ The local Postman captures and live read-side responses determine the exact JSON
 ## Preview revalidation (0.2.1)
 
 Every preview refreshes device inventory and route-set versions. Revalidation compares canonical configuration content, ignoring SDM modification timestamps, modifier names, configuration dataVersion fields, and response collection/property ordering. Actual configuration attributes, route contents and entry IDs, selected targets, associations and verified route baselines remain protected. Original snapshots are retained unchanged for recovery. A rejected preview now names the changed sections in the error details. No provisioning is attempted when revalidation fails.
+
+After a successful apply, a completion dialog summarizes created, updated or deleted objects per SBC, confirms configuration activation, and lists deployed LRT ranges. Demo results are explicitly identified. The dialog appears only after the full transaction succeeds.
