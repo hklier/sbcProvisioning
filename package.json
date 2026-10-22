@@ -1,0 +1,6 @@
+{
+  "name": "vf-ro-sbc-provisioning", "version": "0.1.1", "private": true,
+  "description": "OC and OL provisioning through Oracle SDM",
+  "type": "module", "engines": { "node": ">=22" },
+  "scripts": { "start": "node server.js", "test": "node --test" }
+}

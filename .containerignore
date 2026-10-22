@@ -1,0 +1,8 @@
+*
+!Containerfile
+!package.json
+!server.js
+!lib/
+!lib/**
+!public/
+!public/**

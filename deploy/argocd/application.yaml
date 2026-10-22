@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sbc-provisioning
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hklier/sbcProvisioning.git
+    targetRevision: main
+    path: deploy/kubernetes/base
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sbc-provisioning
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true

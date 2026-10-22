@@ -1,0 +1,20 @@
+services:
+  sbc-provisioning:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: localhost/vf-ro-sbc-provisioning:0.1.0
+    ports:
+      - "127.0.0.1:9080:9080"
+    environment:
+      SDM_BASE_URL: https://192.168.3.153:8443/rest/v1.3
+      APP_USERNAME: ${APP_USERNAME:-admin}
+      APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in your environment or .env file}
+    volumes:
+      - ../vf-ro-provisioning/sdm-rest-api-cred.txt:/run/secrets/sdm-credentials:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

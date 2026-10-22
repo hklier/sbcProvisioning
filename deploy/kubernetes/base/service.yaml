@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sbc-provisioning
+  labels:
+    app.kubernetes.io/name: sbc-provisioning
+  annotations:
+    metallb.io/address-pool: registry-pool
+    metallb.io/loadBalancerIPs: 192.168.2.250
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: sbc-provisioning
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+      protocol: TCP
