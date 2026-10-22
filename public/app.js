@@ -36,6 +36,7 @@ function updateDerived() {
   $('rangePreview').textContent=`${prefix}${field('rangeStart').value} → ${prefix}${field('rangeEnd').value}`;
   $('lrtFields').hidden=field('scope').value==='config';$('lengthLabel').hidden=state.mode!=='OL';$('prefixLabel').hidden=state.mode!=='OL';
   $('associateLabel').hidden=field('scope').value==='config';
+  $('configActionLabel').hidden=field('scope').value==='lrt';
 }
 function renderAgents() {
   const old=[...$('agents').querySelectorAll('input')].map(n=>n.value);$('agents').replaceChildren();

@@ -20,12 +20,12 @@ The supplied SDM at `https://192.168.3.153:8443/rest/v1.3` presents a certificat
 ## Use the tool
 
 1. Connect to Demo or Live and choose an SBC from the device drop-down. A device's `nfId` selects its device group for LRT deployment.
-2. Choose **Operator Connect** or **Office Link**, enter the customer values, and select configuration only, configuration + LRT, or LRT only.
+2. Choose **Operator Connect** or **Office Link**, enter the customer values, and select configuration only, configuration + LRT, or LRT only. **Configuration action** defaults to **Create new**, using `POST /configuration/deviceConfigs/<deviceId>/configElements/add`. Duplicate keys stop the preview. Choose **Update existing** for `POST .../update`, or explicitly select **Create missing / update existing** for a mixed operation.
 3. For LRT, choose the route set and number range. If the selected group is not associated with the route set, explicitly enable **Associate selected SBC if missing**. Association requests are included in the preview. The live OC/OL route sets were unassociated during development; the OL set was also locked by `admin`.
 4. Choose **Preview REST changes**. The backend reads existing state, prepares adds/updates, and displays the request payloads and previous values. Previewing does not add/update configuration, associate devices, save/activate, change entries, or deploy routes. It does call SDM's read-side `loadConfig` to load the configuration into the SDM session.
 5. Review the preview, then choose **Apply in demo** or **Apply to live SBC**. Applying acquires locks, checks for changes since the preview, associates missing target groups only if explicitly selected, adds/updates objects, saves/activates, updates LRT entries, pushes the route set, polls completion, commits and releases acquired locks.
 6. Use **Find existing configuration** to search by BGID or OL customer identifier. For numeric OL customer-ID searches, the tool also checks the full realm/agent `hmrString`. If the numeric LRT ID field is blank, the tool can derive LRT prefixes from matching objects' `hmrString` values.
-7. **Inspect / edit** opens the returned JSON for an object or LRT entry. Updates require a new preview and apply. Configuration key changes may create a new object. Local-policy is available for reading/manual editing; no OC or OL local-policy is generated.
+7. **Inspect / edit** opens the returned JSON for an object or LRT entry. Updates require a new preview and apply. Configuration editing only updates existing keys; use **Create new** on the provisioning form to create objects. Local-policy is available for reading/manual editing; no OC or OL local-policy is generated.
 
 The **REST activity** panel shows method, path, request, response, HTTP status and duration. Expand any call to inspect its payloads. Export the activity as JSON when needed. SDM passwords, cookies and session IDs are masked. Activity and jobs are held in memory, not a durable audit database.
 
@@ -57,14 +57,14 @@ The image runs as a non-root user. It contains only the app, with no credentials
 Build from this directory:
 
 ```powershell
-podman build --format docker -t localhost/vf-ro-sbc-provisioning:0.1.1 -f Containerfile .
+podman build --format docker -t localhost/vf-ro-sbc-provisioning:0.1.2 -f Containerfile .
 podman secret create sdm-credentials ../vf-ro-provisioning/sdm-rest-api-cred.txt
 ```
 
 Set `APP_PASSWORD` in your shell to your chosen tool-login password, then start:
 
 ```powershell
-podman run -d --name sbc-provisioning --restart=unless-stopped --read-only --cap-drop=ALL --security-opt=no-new-privileges -p 127.0.0.1:9080:9080 --secret sdm-credentials,uid=1000,gid=1000,mode=0400 -e APP_USERNAME=admin -e APP_PASSWORD localhost/vf-ro-sbc-provisioning:0.1.1
+podman run -d --name sbc-provisioning --restart=unless-stopped --read-only --cap-drop=ALL --security-opt=no-new-privileges -p 127.0.0.1:9080:9080 --secret sdm-credentials,uid=1000,gid=1000,mode=0400 -e APP_USERNAME=admin -e APP_PASSWORD localhost/vf-ro-sbc-provisioning:0.1.2
 ```
 
 Alternatively, with Podman Compose installed and `APP_PASSWORD` set:

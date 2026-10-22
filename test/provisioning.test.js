@@ -1,10 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { generate,attr,element,merge,selector,locked,applyConfig,deployRoutes,resolveRoute } from '../lib/provisioning.js';
+import { generate,attr,element,merge,selector,locked,applyConfig,deployRoutes,resolveRoute,resolveObjects } from '../lib/provisioning.js';
 import { SdmClient,redact } from '../lib/sdm.js';
 const oc={mode:'OC',bgid:'1227100253',sipPort:'6000',sipAddress:'10.229.189.129',includeLrt:true,routeSetId:'2',rangeStart:'371542577',rangeEnd:'371542579'};
 const ol={mode:'OL',customerIdentifier:'N529704BUCPE4',customerCli:'372818574',lrtCustomerId:'152970402130004',agentIps:['172.22.250.226','172.22.250.227','172.22.250.228','172.22.250.229'],includeLrt:true,routeSetId:'3',numberLength:'9',rangeStart:'372818574',rangeEnd:'372818576'};
+test('new configuration elements are sent to POST /add for all supported types',async()=>{
+  const objects=[...generate(oc).objects,...generate(ol).objects.slice(1),element('localPolicy',{},[element('localPolicy/from',{addr:'*'}),element('localPolicy/to',{addr:'123'}),element('localPolicy/sourceRealm',{name:'access'})])];
+  const calls=[];const client={list:async()=>[],request:async(m,p,b)=>{calls.push({m,p,b});return {status:'SUCCESS'};}};
+  const ops=await resolveObjects(client,'ID8',objects);
+  await applyConfig(client,'ID8',ops);
+  assert.equal(ops.length,8);assert.ok(ops.every(op=>op.method==='POST' && op.path==='/configuration/deviceConfigs/ID8/configElements/add'));
+  assert.equal(calls.filter(c=>c.p.endsWith('/add')).length,8);assert.ok(!calls.some(c=>c.p.endsWith('/update')));
+});
+test('create rejects duplicate keys; update requires an existing key; auto remains explicit',async()=>{
+  const object=element('realmConfig',{id:'customer'});const client={list:async()=>[object],request:async()=>object};
+  await assert.rejects(resolveObjects(client,'ID8',[object]),/already exists/);
+  const update=await resolveObjects(client,'ID8',[object],'update');assert.ok(update[0].path.endsWith('/update'));
+  const mixed=await resolveObjects(client,'ID8',[object,element('realmConfig',{id:'new'})],'auto');assert.deepEqual(mixed.map(op=>op.path.split('/').at(-1)),['update','add']);
+  client.list=async()=>[];await assert.rejects(resolveObjects(client,'ID8',[object],'update'),/does not exist/);
+});
 test('OC naming, both SIP transports, exact string LRT keys and regex backreference',()=>{
   const p=generate(oc);assert.equal(p.realm,'core-oc-bgid1227100253');assert.equal(p.objects.length,2);
   assert.deepEqual(p.objects[1].childrenElements.map(e=>[attr(e,'port'),attr(e,'transProtocol')]),[['6000','TCP'],['6000','UDP']]);

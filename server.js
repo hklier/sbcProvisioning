@@ -70,7 +70,7 @@ async function prepare(session,client,input) {
   const configurations=[];
   if(input.scope!=='lrt') for(const device of devices) {
     await cleanConfig(client,device.id);
-    configurations.push({deviceId:device.id,operations:await resolveObjects(client,device.id,generated.objects)});
+    configurations.push({deviceId:device.id,operations:await resolveObjects(client,device.id,generated.objects,input.kind==='edit'?'update':input.configAction || 'create')});
   }
   const route=await routeOperation(session,client,input,generated.route);
   if(input.scope==='lrt' && !route) throw new Error('Enable LRT to prepare an LRT-only change');
