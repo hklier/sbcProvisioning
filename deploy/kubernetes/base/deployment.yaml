@@ -25,7 +25,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: web
-          image: 192.168.2.240:5000/vf-ro-sbc-provisioning@sha256:c02b1839894fb7f8bdc2a3253b8e50c2370636fc257eaec6b467dc6a9777aa25
+          image: 192.168.2.240:5000/vf-ro-sbc-provisioning@sha256:83c74a3b964bbf36b042df040ccfc8ed4ebcea2b4e8723099c32db9c8df15bce
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9080
