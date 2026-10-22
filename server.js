@@ -8,6 +8,7 @@ import { SdmClient, readCredentials, redact } from './lib/sdm.js';
 import { DemoClient } from './lib/demo.js';
 import { prepareDeletion } from './lib/deletion.js';
 import { executeTransaction } from './lib/transaction.js';
+import {previewDigest,changedSections} from './lib/preview.js';
 import { TYPES, generate, selector, matches, routeMatches, configRoot, cleanConfig, resolveObjects, resolveRoute, fingerprint } from './lib/provisioning.js';
 
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
@@ -116,7 +117,7 @@ async function prepare(session,client,input) {
   const routeSnapshot=route?await client.list(`/routeSets/${encodeURIComponent(input.routeSetId)}/entries/`,'routeSetEntries'):undefined;
   return {configurations,route,routes:route?[route]:[],routeSnapshot,routeBaselineVerified,associations,deviceIds:devices.map(d=>d.id),groupIds,routeSetId:input.routeSetId || '',warnings:generated.warnings,realm:generated.realm,customerCli:generated.customerCli};
 }
-function digest(plan) { return fingerprint({configurations:plan.configurations,routes:plan.routes,routeSnapshot:plan.routeSnapshot,routeBaselineVerified:plan.routeBaselineVerified,associations:plan.associations,deviceIds:plan.deviceIds,groupIds:plan.groupIds,routeSetId:plan.routeSetId}); }
+const digest=previewDigest;
 async function apply(session,client,plan) {
   if(plan.used || Date.now()>plan.expires) throw new Error('Preview expired or already used; generate a new preview');
   if(session.mode==='live' && liveWriter) throw new Error('Another live provisioning operation is running');
@@ -125,7 +126,7 @@ async function apply(session,client,plan) {
   plan.used=true;
   try {return await executeTransaction(client,plan,{revalidate:async()=>{
     await inventory(session,client);const fresh=await prepare(session,client,plan.input);
-    if(digest(fresh)!==plan.digest)throw new Error('SDM state changed since preview. Generate a new preview before applying.');
+    if(digest(fresh)!==plan.digest)throw Object.assign(new Error(`SDM state changed since preview (${changedSections(plan,fresh).join(', ')}). Generate a new preview before applying.`),{details:{phase:'preview revalidation',changedSections:changedSections(plan,fresh)}});
     if(session.mode==='demo'){client.failure=plan.input.demoFailure || '';client.failureDevice=plan.deviceIds[1] || plan.deviceIds[0];}
   }});}
   finally { if(session.mode==='live') liveWriter=false; }
@@ -192,7 +193,7 @@ const server=createServer(async(req,res)=>{
       return client.request('POST',`${configRoot(input.deviceId)}/retrieve`,selector(input.object));
     }));
     if(url.pathname==='/api/preview') return send(res,202,createJob(session,async client=>{
-      if(!session.devices?.length) await inventory(session,client);
+      await inventory(session,client);
       const plan=await prepare(session,client,input); plan.id=token();plan.input=input;plan.expires=Date.now()+15*60000;plan.digest=digest(plan);
       session.plans.clear();session.plans.set(plan.id,plan);
       return {...plan,steps:[`Lock and snapshot ${plan.deviceIds.length} target(s); automatically restore changed state if any step fails`,...plan.configurations.map(c=>`${c.deviceId}: ${c.operations.length} ${plan.kind==='delete'?'delete':'add/update'} calls → SaveActivateConfig`),...(plan.routes.length?[`Route set: ${plan.routes.length} entry change(s) → push to all selected groups → verify → commit`]:[])]};

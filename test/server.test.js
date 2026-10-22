@@ -15,6 +15,7 @@ test('web API: CSRF, preview/apply, search, OL agents, LRT update and consumed p
   const input={mode:'OC',configAction:'update',deviceIds:['ID8'],bgid:'1227100253',sipPort:'6005',sipAddress:'10.229.189.129',includeLrt:true,routeSetId:'2',rangeStart:'371542590',rangeEnd:'371542592',scope:'both'};
   const duplicate=await run('preview',{...input,configAction:'create'});assert.equal(duplicate.status,'failed');assert.match(duplicate.error,/already exists/);
   const preview=await run('preview',input);assert.equal(preview.status,'complete',preview.error);assert.equal(preview.result.configurations[0].operations[1].method,'POST');
+  assert.ok(preview.logs.some(l=>l.method==='GET' && l.url.endsWith('/routeSets/')),'every preview refreshes route set versions rather than using cached connection inventory');
   const applied=await run('apply',{planId:preview.result.id});assert.equal(applied.status,'complete',applied.error);assert.equal(applied.result.completed.length,3);assert.ok(applied.logs.some(l=>l.request?.type==='Commit'));assert.ok(applied.logs.some(l=>l.request?.type==='Unlock'));
   assert.equal((await run('apply',{planId:preview.result.id})).status,'failed');
   const search=await run('search',{deviceId:'ID8',mode:'OC',type:'all',filter:'1227100253',routeSetId:'2'});assert.equal(search.status,'complete',search.error);assert.equal(search.result.objects.length,2);assert.equal(search.result.routes.length,2);
