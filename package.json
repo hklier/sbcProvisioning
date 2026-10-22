@@ -1,5 +1,5 @@
 {
-  "name": "vf-ro-sbc-provisioning", "version": "0.1.2", "private": true,
+  "name": "vf-ro-sbc-provisioning", "version": "0.2.0", "private": true,
   "description": "OC and OL provisioning through Oracle SDM",
   "type": "module", "engines": { "node": ">=22" },
   "scripts": { "start": "node server.js", "test": "node --test" }

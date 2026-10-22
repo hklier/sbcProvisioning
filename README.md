@@ -19,7 +19,7 @@ The supplied SDM at `https://192.168.3.153:8443/rest/v1.3` presents a certificat
 
 ## Use the tool
 
-1. Connect to Demo or Live and choose an SBC from the device drop-down. A device's `nfId` selects its device group for LRT deployment.
+1. Connect to Demo or Live and choose one or two SBCs from the target drop-downs. Select one representative per HA cluster or standalone device group. A device's `nfId` selects its device group for LRT deployment.
 2. Choose **Operator Connect** or **Office Link**, enter the customer values, and select configuration only, configuration + LRT, or LRT only. **Configuration action** defaults to **Create new**, using `POST /configuration/deviceConfigs/<deviceId>/configElements/add`. Duplicate keys stop the preview. Choose **Update existing** for `POST .../update`, or explicitly select **Create missing / update existing** for a mixed operation.
 3. For LRT, choose the route set and number range. If the selected group is not associated with the route set, explicitly enable **Associate selected SBC if missing**. Association requests are included in the preview. The live OC/OL route sets were unassociated during development; the OL set was also locked by `admin`.
 4. Choose **Preview REST changes**. The backend reads existing state, prepares adds/updates, and displays the request payloads and previous values. Previewing does not add/update configuration, associate devices, save/activate, change entries, or deploy routes. It does call SDM's read-side `loadConfig` to load the configuration into the SDM session.
@@ -57,14 +57,14 @@ The image runs as a non-root user. It contains only the app, with no credentials
 Build from this directory:
 
 ```powershell
-podman build --format docker -t localhost/vf-ro-sbc-provisioning:0.1.2 -f Containerfile .
+podman build --format docker -t localhost/vf-ro-sbc-provisioning:0.2.0 -f Containerfile .
 podman secret create sdm-credentials ../vf-ro-provisioning/sdm-rest-api-cred.txt
 ```
 
 Set `APP_PASSWORD` in your shell to your chosen tool-login password, then start:
 
 ```powershell
-podman run -d --name sbc-provisioning --restart=unless-stopped --read-only --cap-drop=ALL --security-opt=no-new-privileges -p 127.0.0.1:9080:9080 --secret sdm-credentials,uid=1000,gid=1000,mode=0400 -e APP_USERNAME=admin -e APP_PASSWORD localhost/vf-ro-sbc-provisioning:0.1.2
+podman run -d --name sbc-provisioning --restart=unless-stopped --read-only --cap-drop=ALL --security-opt=no-new-privileges -p 127.0.0.1:9080:9080 --secret sdm-credentials,uid=1000,gid=1000,mode=0400 -e APP_USERNAME=admin -e APP_PASSWORD localhost/vf-ro-sbc-provisioning:0.2.0
 ```
 
 Alternatively, with Podman Compose installed and `APP_PASSWORD` set:
@@ -101,7 +101,21 @@ Development verification against the supplied SDM succeeded for login/logout, in
 
 Preview IDs expire after 15 minutes and can be applied once. Pending SDM configuration changes block provisioning rather than silently applying unrelated changes. Reads fetch all pages; a repeated page or exceeded limit reports an error instead of returning incomplete results. Only acquired locks are released; another session's locks are never overridden. Reconnect to SDM if its session expires; uncertain writes are not automatically retried.
 
-Configuration activation and LRT deployment are separate transactions. LRT push failures request rollback and report the update ID, but rollback completion is not assumed. A staged object change, new route association, or updated SDM entry can remain after a later failure. Inspect the REST responses and SDM state before retrying. This first version does not implement durable job recovery, bulk import, automatic deletion, or scheduled provisioning.
+Configuration activation and LRT deployment are separate SDM transactions. The application coordinates them with compensating operations and explicit verification, as described below. This version does not implement durable job recovery after a process crash, bulk import or scheduled provisioning.
+
+## Customer deletion and two-target recovery
+
+In **Find existing configuration**, enter an exact OC BGID, OL customer identifier, or numeric OL customer ID. Choose **Delete scope**, then **Preview customer deletion**. Review the per-target object keys, route ranges and before-values. Applying deletion requires the explicit review checkbox. Search results can be broad; deletion resolves exact customer ownership independently of those displayed search results and ignores the Object type search selector.
+
+OC deletion selects the generated realm, its SIP interface and any local policy whose source realm is exactly that customer realm. OL deletion resolves the numeric ID through exact `hmrString` values and removes the customer's realm, agents 1–4, session group, related SIP interface and any customer-scoped local policies. Shared parent realms/global policies are excluded. Unknown/custom ownership conventions are not guessed. Provide the numeric OL ID when orphaned LRT entries cannot be mapped from customer objects. LRT ranges must have both endpoints under the customer prefix; prefixes colliding with another known customer are rejected.
+
+Choose a second independent target before preparing a provisioning, update or deletion preview. Configuration changes are staged on both targets before either activation. A failure triggers recovery of every touched target, including the request that failed (its outcome might be uncertain). Recovery discards this SDM user's clean-at-start staging changes, restores before-values or removes newly created objects, saves/activates original configuration content, and retrieves objects again for comparison. Device configuration version numbers/timestamps can advance during recovery.
+
+LRT tasks are rolled back and polled until per-group recovery is confirmed. SDM entry content is restored separately. When a push outcome is uncertain, re-deployment of the original table is attempted only if all selected groups had a verified common pre-update version. Otherwise the tool reports incomplete recovery instead of overwriting an unknown original device table. Newly created route-set associations are removed and checked. Re-created LRT entries may receive new SDM-generated object IDs; their original routing content is restored.
+
+The **Operation failed** dialog includes the failing REST endpoint/status/response, recovery result per target, completed steps, and expandable rollback details. It explicitly distinguishes verified restoration, no changes requiring rollback, and incomplete recovery. REST activity includes the recovery calls and remains exportable. In Demo mode, **Test automatic rollback** can inject a second-target activation failure or LRT push failure; this control has no effect on live SDM.
+
+There is no distributed atomic transaction across SDM and the SBCs. Automatic rollback is attempted and verified, but unavailable devices, lost SDM connectivity, rejected restore operations, encrypted/masked attributes, or process termination can prevent full recovery. An incomplete result requires inspection before retrying. Snapshots/jobs are currently in memory; do not restart or upgrade the app during active provisioning/recovery. No live customer deletion or deliberate live failure was executed during development; failure recovery is verified against the simulated SDM with separate running/staged configurations.
 
 ## Sources
 
@@ -110,5 +124,7 @@ Configuration activation and LRT deployment are separate transactions. LRT push 
 - [Oracle SDM authentication](https://docs.oracle.com/en/industries/communications/session-delivery-manager/9.0/rest/authenticate.html).
 - [Oracle SDM configuration list and pagination](https://docs.oracle.com/en/industries/communications/session-delivery-manager/9.0/rest901/op-versionid-configuration-deviceconfigs-deviceid-configelements-get.html).
 - [Oracle SDM route set association](https://docs.oracle.com/en/industries/communications/session-delivery-manager/9.0/rest901/op-versionid-routesets-routesetid-devices-post.html).
+- [Oracle SDM configuration deletion](https://docs.oracle.com/en/industries/communications/session-delivery-manager/9.0/rest901/op-versionid-configuration-deviceconfigs-deviceid-configelements-delete-post.html).
+- [Oracle SDM staging cleanup](https://docs.oracle.com/en/industries/communications/session-delivery-manager/9.0/rest901/op-versionid-configuration-deviceconfigs-deviceid-configurationchanges-delete.html).
 
 The local Postman captures and live read-side responses determine the exact JSON attribute names used here. No cloud SDM or direct-to-SBC REST endpoints are used.

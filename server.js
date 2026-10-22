@@ -6,12 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { SdmClient, readCredentials, redact } from './lib/sdm.js';
 import { DemoClient } from './lib/demo.js';
-import { TYPES, generate, selector, matches, routeMatches, configRoot, cleanConfig, resolveObjects, resolveRoute, locked, applyConfig, deployRoutes, fingerprint } from './lib/provisioning.js';
+import { prepareDeletion } from './lib/deletion.js';
+import { executeTransaction } from './lib/transaction.js';
+import { TYPES, generate, selector, matches, routeMatches, configRoot, cleanConfig, resolveObjects, resolveRoute, fingerprint } from './lib/provisioning.js';
 
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 const BASE=process.env.SDM_BASE_URL || 'https://192.168.3.153:8443/rest/v1.3';
 const CREDENTIALS=process.env.SDM_CREDENTIALS_FILE || path.resolve(ROOT,'../vf-ro-provisioning/sdm-rest-api-cred.txt');
-const sessions=new Map(); let liveWriter=false; let shuttingDown=false;
+const sessions=new Map(); let liveWriter=false; let liveJobs=0; let shuttingDown=false;
 const token=()=>randomBytes(24).toString('hex');
 function send(res,status,body,type='application/json; charset=utf-8') { res.writeHead(status,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",'Referrer-Policy':'no-referrer'}); res.end(type.startsWith('application/json')?JSON.stringify(body):body); }
 async function body(req) { let text=''; for await(const chunk of req) { text+=chunk; if(text.length>1024*1024) throw new Error('Request exceeds 1 MB'); } return JSON.parse(text || '{}'); }
@@ -31,11 +33,13 @@ function getSession(req,res) {
   session.lastSeen=Date.now(); return session;
 }
 function createJob(session,fn) {
+  if(session.mode==='live' && liveWriter)throw new Error('Another live provisioning/recovery operation is running. Wait before starting a new operation.');
   if([...session.jobs.values()].some(j=>j.status==='running')) throw new Error('Wait for the current operation to finish');
   const job={id:token(),status:'running',logs:[],started:new Date().toISOString()}; session.jobs.set(job.id,job);
   if(session.jobs.size>20) session.jobs.delete(session.jobs.keys().next().value);
   const client=session.client; client.onLog=entry=>{ if(job.logs.length>=3000) { job.logs.shift(); job.truncated=true; } job.logs.push(redact(entry)); };
-  Promise.resolve().then(()=>fn(client)).then(result=>{job.result=result;job.status='complete';}).catch(error=>{job.error=redact(error.message,[client.credentials?.password,client.cookie,client.cookie?.split('=')[1]]);job.status='failed';}).finally(()=>{client.onLog=()=>{};});
+  const live=session.mode==='live';if(live)liveJobs++;
+  Promise.resolve().then(()=>fn(client)).then(result=>{job.result=result;job.status='complete';}).catch(error=>{const secrets=[client.credentials?.password,client.cookie,client.cookie?.split('=')[1]];job.error=redact(error.message,secrets);job.failure=redact({message:error.message,api:error.details,rollback:error.rollback || {status:'not-needed'},completed:error.completed || [],failedCalls:job.logs.filter(l=>l.status==='ERROR' || Number(l.status)>=400).slice(-10)},secrets);job.status='failed';}).finally(()=>{client.onLog=()=>{};if(live)liveJobs--;});
   return {jobId:job.id};
 }
 async function inventory(session,client) {
@@ -44,7 +48,7 @@ async function inventory(session,client) {
   return {devices:session.devices,routeSets:session.routeSets,mode:session.mode};
 }
 function targets(session,input) {
-  if(!Array.isArray(input.deviceIds) || !input.deviceIds.length) throw new Error('Select at least one SBC');
+  if(!Array.isArray(input.deviceIds) || !input.deviceIds.length || input.deviceIds.length>2) throw new Error('Select one or two SBC targets');
   const devices=input.deviceIds.map(deviceId=>session.devices?.find(d=>d.id===deviceId));
   if(devices.some(d=>!d)) throw new Error('Unknown target device; refresh inventory');
   if(new Set(devices.map(d=>d.nfId || d.id)).size!==devices.length) throw new Error('Select one SBC per HA/device group to avoid applying the same group twice');
@@ -59,6 +63,23 @@ async function routeOperation(session,client,input,route) {
 }
 async function prepare(session,client,input) {
   const devices=targets(session,input);
+  if(input.kind==='delete') {
+    if(input.scope!=='config') {
+      const set=session.routeSets?.find(r=>String(r.routeSetId)===String(input.routeSetId));
+      if(!set)throw new Error('Select a known route set');
+      if(String(set.lockState)==='true' && set.lockOwner && set.lockOwner!==client.credentials?.userName)throw new Error(`Route set is locked by ${set.lockOwner}`);
+    }
+    const deletion=await prepareDeletion(client,devices,input);
+    const groupIds=[...new Set(devices.map(d=>d.nfId).filter(Boolean))];
+    let routeBaselineVerified=false;
+    if(deletion.routes.length) {
+      const existing=await client.request('GET',`/routeSets/${encodeURIComponent(input.routeSetId)}/devices/`);
+      if(devices.some(d=>!d.nfId) || groupIds.some(g=>!existing.assocDevices?.some(a=>a.deviceGroupId===g)))throw new Error('Associate every selected target with this route set before deleting deployed LRT entries');
+      const set=session.routeSets.find(r=>String(r.routeSetId)===String(input.routeSetId));
+      routeBaselineVerified=set.version!==undefined && groupIds.every(g=>existing.assocDevices.some(a=>a.deviceGroupId===g && String(a.version)===String(set.version)));
+    }
+    return {...deletion,route:null,routeBaselineVerified,associations:[],deviceIds:devices.map(d=>d.id),groupIds,routeSetId:input.routeSetId || ''};
+  }
   let generated;
   if(input.kind==='routeEdit') {
     const r=input.route;
@@ -77,44 +98,36 @@ async function prepare(session,client,input) {
   if(route && devices.some(d=>!d.nfId)) throw new Error('Selected SBC has no device group for LRT deployment');
   const groupIds=[...new Set(devices.map(d=>d.nfId).filter(Boolean))];
   const associations=[];
+  let routeBaselineVerified=false;
   if(route) {
     let existing;
     try {existing=await client.request('GET',`/routeSets/${encodeURIComponent(input.routeSetId)}/devices/`);}
     catch(e) {if(e.status!==404)throw e;existing={assocDevices:[]};}
     if(!Array.isArray(existing?.assocDevices))throw new Error('Unexpected SDM route set association response');
     const missing=groupIds.filter(group=>!existing.assocDevices.some(a=>a.deviceGroupId===group));
+    const set=session.routeSets.find(r=>String(r.routeSetId)===String(input.routeSetId));
+    routeBaselineVerified=set.version!==undefined && groupIds.every(g=>existing.assocDevices.some(a=>a.deviceGroupId===g && String(a.version)===String(set.version)));
     if(missing.length && !input.associateTarget)throw new Error(`Route set is not associated with device group(s) ${missing.join(', ')}. Enable “Associate selected SBC if missing” or select an associated route set.`);
     if(missing.length) {
       associations.push({method:'POST',path:`/routeSets/${encodeURIComponent(input.routeSetId)}/devices/`,body:{assocDevices:missing.map(deviceGroupId=>({deviceGroupId}))}});
-      generated.warnings.push('The preview includes a new route set association for the selected SBC group. Association changes persist if a later step fails.');
+      generated.warnings.push('The preview includes a new route set association for the selected SBC group. It is included in automatic rollback.');
     }
   }
-  return {configurations,route,associations,deviceIds:devices.map(d=>d.id),groupIds,routeSetId:input.routeSetId || '',warnings:generated.warnings,realm:generated.realm,customerCli:generated.customerCli};
+  const routeSnapshot=route?await client.list(`/routeSets/${encodeURIComponent(input.routeSetId)}/entries/`,'routeSetEntries'):undefined;
+  return {configurations,route,routes:route?[route]:[],routeSnapshot,routeBaselineVerified,associations,deviceIds:devices.map(d=>d.id),groupIds,routeSetId:input.routeSetId || '',warnings:generated.warnings,realm:generated.realm,customerCli:generated.customerCli};
 }
-function digest(plan) { return fingerprint({configurations:plan.configurations,route:plan.route,associations:plan.associations,deviceIds:plan.deviceIds,groupIds:plan.groupIds,routeSetId:plan.routeSetId}); }
+function digest(plan) { return fingerprint({configurations:plan.configurations,routes:plan.routes,routeSnapshot:plan.routeSnapshot,routeBaselineVerified:plan.routeBaselineVerified,associations:plan.associations,deviceIds:plan.deviceIds,groupIds:plan.groupIds,routeSetId:plan.routeSetId}); }
 async function apply(session,client,plan) {
   if(plan.used || Date.now()>plan.expires) throw new Error('Preview expired or already used; generate a new preview');
   if(session.mode==='live' && liveWriter) throw new Error('Another live provisioning operation is running');
+  if(session.mode==='live' && liveJobs>1)throw new Error('Other live reads/previews are running. Wait before applying a transaction.');
   if(session.mode==='live') liveWriter=true;
   plan.used=true;
-  const completed=[];
-  const resources=[...plan.configurations.map(c=>`/inventory/deviceMgmt/devices/${encodeURIComponent(c.deviceId)}/action`),...(plan.route?[`/routeSets/${encodeURIComponent(plan.routeSetId)}/action`]:[])];
-  const withLocks=async index=> index===resources.length ? perform() : locked(client,resources[index],()=>withLocks(index+1));
-  async function perform() {
-    await inventory(session,client);
-    const fresh=await prepare(session,client,plan.input);
-    if(digest(fresh)!==plan.digest) throw new Error('SDM state changed since preview. Generate a new preview before applying.');
-    for(const op of plan.associations) {await client.request(op.method,op.path,op.body);completed.push('Selected device group associated with the route set');}
-    for(const config of plan.configurations) { await applyConfig(client,config.deviceId,config.operations); completed.push(`Configuration activated on ${config.deviceId}`); }
-    if(plan.route) {
-      await client.request(plan.route.method,plan.route.path,plan.route.body);
-      completed.push('LRT entry stored in SDM');
-      const result=await deployRoutes(client,plan.routeSetId,plan.groupIds);
-      completed.push(`LRT deployed and committed (${result.updateId})`);
-    }
-    return {completed};
-  }
-  try {return await withLocks(0);} catch(e) {e.message+=completed.length?`; completed steps: ${completed.join('; ')}. Configuration and LRT are separate transactions.`:'';throw e;}
+  try {return await executeTransaction(client,plan,{revalidate:async()=>{
+    await inventory(session,client);const fresh=await prepare(session,client,plan.input);
+    if(digest(fresh)!==plan.digest)throw new Error('SDM state changed since preview. Generate a new preview before applying.');
+    if(session.mode==='demo'){client.failure=plan.input.demoFailure || '';client.failureDevice=plan.deviceIds[1] || plan.deviceIds[0];}
+  }});}
   finally { if(session.mode==='live') liveWriter=false; }
 }
 
@@ -182,7 +195,7 @@ const server=createServer(async(req,res)=>{
       if(!session.devices?.length) await inventory(session,client);
       const plan=await prepare(session,client,input); plan.id=token();plan.input=input;plan.expires=Date.now()+15*60000;plan.digest=digest(plan);
       session.plans.clear();session.plans.set(plan.id,plan);
-      return {...plan,steps:[...plan.configurations.map(c=>`Lock ${c.deviceId} → revalidate → ${c.operations.length} add/update calls → SaveActivateConfig → unlock`),...(plan.route?['Lock route set → revalidate → add/update entry → push to selected device groups → poll → commit → unlock']:[])]};
+      return {...plan,steps:[`Lock and snapshot ${plan.deviceIds.length} target(s); automatically restore changed state if any step fails`,...plan.configurations.map(c=>`${c.deviceId}: ${c.operations.length} ${plan.kind==='delete'?'delete':'add/update'} calls → SaveActivateConfig`),...(plan.routes.length?[`Route set: ${plan.routes.length} entry change(s) → push to all selected groups → verify → commit`]:[])]};
     }));
     if(url.pathname==='/api/apply') {const plan=session.plans.get(input.planId);if(!plan) throw new Error('Generate a preview first');return send(res,202,createJob(session,c=>apply(session,c,plan)));}
     return send(res,404,{error:'Not found'});

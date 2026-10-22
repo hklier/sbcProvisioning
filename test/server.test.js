@@ -28,4 +28,9 @@ test('web API: CSRF, preview/apply, search, OL agents, LRT update and consumed p
   const denied=await run('preview',missingAssociation);assert.equal(denied.status,'failed');assert.match(denied.error,/not associated/);
   const associationPlan=await run('preview',{...missingAssociation,associateTarget:true});assert.equal(associationPlan.status,'complete',associationPlan.error);assert.equal(associationPlan.result.associations[0].body.assocDevices[0].deviceGroupId,'ID12');
   const associationApplied=await run('apply',{planId:associationPlan.result.id});assert.equal(associationApplied.status,'complete',associationApplied.error);assert.ok(associationApplied.logs.some(l=>l.request?.assocDevices?.[0]?.deviceGroupId==='ID12'));
+  const both={...input,configAction:'create',bgid:'9876543210',scope:'config',deviceIds:['ID8','ID6'],includeLrt:false,demoFailure:'activate-second'};
+  const bothPreview=await run('preview',both);assert.equal(bothPreview.status,'complete',bothPreview.error);
+  const failed=await run('apply',{planId:bothPreview.result.id});assert.equal(failed.status,'failed');assert.equal(failed.failure.rollback.status,'restored');assert.equal(failed.failure.rollback.devices.length,2);assert.ok(failed.failure.failedCalls.length);
+  const again=await run('preview',{...both,demoFailure:''});assert.equal(again.status,'complete',again.error);assert.equal((await run('apply',{planId:again.result.id})).status,'complete');
+  const deletion=await run('preview',{kind:'delete',mode:'OC',filter:'9876543210',scope:'config',deviceIds:['ID8','ID6']});assert.equal(deletion.status,'complete',deletion.error);assert.equal(deletion.result.configurations[0].operations.length,2);assert.ok(deletion.result.configurations.every(c=>c.operations.every(o=>o.path.endsWith('/delete'))));assert.equal((await run('apply',{planId:deletion.result.id})).status,'complete');
 });
