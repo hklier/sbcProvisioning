@@ -1,6 +1,6 @@
 const $=id=>document.getElementById(id);
 const form=$('provisionForm');
-const state={mode:'OC',connection:'demo',csrf:'',devices:[],routeSets:[],logs:[],plan:null,busy:false,editor:null};
+const state={mode:'OC',connection:'demo',csrf:'',devices:[],routeSets:[],logs:[],plan:null,busy:false,editor:null,successExport:null};
 const field=name=>form.elements.namedItem(name);
 const selectedTargets=()=>[$('device').value,$('device2').value].filter(Boolean);
 const targetName=id=>{const d=state.devices.find(d=>d.id===id);return d?`${d.name} (${d.id})`:id || 'Select an SBC target';};
@@ -15,7 +15,11 @@ function showError(error) {
   $('errorDetails').textContent=JSON.stringify(detail,null,2);if(!$('errorDialog').open)$('errorDialog').showModal();
 }
 function el(tag,text,className) {const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;}
-function showSuccess(plan) {
+function showSuccess(plan,result) {
+  state.successExport={environment:state.connection,operation:plan.kind || 'provision',completedAt:new Date().toISOString(),targets:plan.deviceIds.map(deviceId=>({deviceId,name:state.devices.find(d=>d.id===deviceId)?.name || deviceId})),calls:result.changeCalls || []};
+  $('successCallsPanel').hidden=true;$('viewSuccessCalls').textContent='View REST calls';$('viewSuccessCalls').setAttribute('aria-expanded','false');
+  $('successCallsJson').textContent=JSON.stringify(state.successExport,null,2);$('successCallCount').textContent=`${state.successExport.calls.length} change calls`;
+  $('viewSuccessCalls').disabled=!state.successExport.calls.length;$('downloadSuccessCalls').disabled=!state.successExport.calls.length;
   $('successMessage').textContent=state.connection==='demo'?'Changes completed in Demo. No live SBC changes were made.':'All requested changes completed successfully.';
   const summary=$('successSummary');summary.replaceChildren();
   const labels={realmConfig:'realm',sipInterface:'SIP interface',sessionAgent:'session agent',sessionAgentGroup:'session group',localPolicy:'local policy'};
@@ -135,10 +139,12 @@ form.addEventListener('input',()=>{invalidate();updateDerived();});form.addEvent
 $('device').addEventListener('change',()=>{invalidate();updateDerived();});$('searchForm').addEventListener('input',invalidate);$('searchForm').addEventListener('change',invalidate);
 $('device2').addEventListener('change',()=>{invalidate();updateDerived();});$('closeError').addEventListener('click',()=>$('errorDialog').close());
 $('closeSuccess').addEventListener('click',()=>$('successDialog').close());
+$('viewSuccessCalls').addEventListener('click',()=>{const panel=$('successCallsPanel');panel.hidden=!panel.hidden;$('viewSuccessCalls').textContent=panel.hidden?'View REST calls':'Hide REST calls';$('viewSuccessCalls').setAttribute('aria-expanded',String(!panel.hidden));});
+$('downloadSuccessCalls').addEventListener('click',()=>{if(state.successExport)downloadJson(state.successExport,`sbc-change-calls-${state.successExport.operation}-${state.successExport.completedAt.replace(/[:.]/g,'-')}.json`);});
 form.addEventListener('submit',action(async()=>showPlan(await run('preview',readInput()))));
 $('searchForm').addEventListener('submit',action(async()=>{invalidate();const input=Object.fromEntries(new FormData($('searchForm')));showResults(await run('search',{...input,mode:state.mode,deviceId:$('device').value}));}));
 $('previewDelete').addEventListener('click',action(async()=>{const input=Object.fromEntries(new FormData($('searchForm')));showPlan(await run('preview',{kind:'delete',mode:state.mode,deviceIds:selectedTargets(),filter:input.filter,numericId:input.numericId,scope:input.deleteScope,routeSetId:input.routeSetId,demoFailure:field('demoFailure').value}));}));
-$('applyPlan').addEventListener('click',action(async()=>{if(!state.plan)throw new Error('Generate a new preview');if(state.plan.kind==='delete' && !$('deleteConfirm').checked)throw new Error('Review the deletion preview and select the confirmation checkbox.');const plan=state.plan;invalidate();const result=await run('apply',{planId:plan.id});notice(result.completed.join(' · '));showSuccess(plan);}));
+$('applyPlan').addEventListener('click',action(async()=>{if(!state.plan)throw new Error('Generate a new preview');if(state.plan.kind==='delete' && !$('deleteConfirm').checked)throw new Error('Review the deletion preview and select the confirmation checkbox.');const plan=state.plan;invalidate();const result=await run('apply',{planId:plan.id});notice(result.completed.join(' · '));showSuccess(plan,result);}));
 $('discardPlan').addEventListener('click',invalidate);
 $('refresh').addEventListener('click',action(async()=>{invalidate();renderInventory(await run('inventory',{}));notice('Inventory refreshed.');}));
 $('connectionButton').addEventListener('click',()=>{$('connectionMode').value=state.connection;$('connectionDialog').showModal();});$('closeConnection').addEventListener('click',()=>$('connectionDialog').close());
@@ -159,6 +165,7 @@ $('connectionForm').addEventListener('submit',action(async()=>{const input={mode
 $('closeEditor').addEventListener('click',()=>$('editorDialog').close());
 $('previewEdit').addEventListener('click',action(async()=>{const object=JSON.parse($('objectEditor').value);const input=state.editor.kind==='route'?{kind:'routeEdit',scope:'lrt',deviceIds:selectedTargets(),routeSetId:$('searchRouteSet').value,entryId:object.objectId,route:object}:{kind:'edit',scope:'config',deviceIds:selectedTargets(),object,...(!$('editorSipFields').hidden?{sipAddresses:{[$('device').value]:$('editorSip1').value,[$('device2').value]:$('editorSip2').value}}:{})};$('editorDialog').close();showPlan(await run('preview',input));}));
 $('clearLog').addEventListener('click',()=>{state.logs=[];$('activityLog').replaceChildren(el('p','Activity cleared.','help'));$('callCount').textContent='0 calls';});
-$('exportLog').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(state.logs,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download=`sbc-rest-activity-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
+function downloadJson(value,filename){const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+$('exportLog').addEventListener('click',()=>downloadJson(state.logs,`sbc-rest-activity-${new Date().toISOString().replace(/[:.]/g,'-')}.json`));
 renderAgents();updateDerived();
 action(async()=>{const status=await api('status');state.csrf=status.csrf;$('baseUrl').value=status.baseUrl;$('passwordUsername').defaultValue=status.appUsername;$('passwordButton').disabled=!status.passwordChangeAvailable;$('passwordButton').title=status.passwordChangeAvailable?'Change your application login password':'Password changes require application login and persistent password storage';$('credentialState').textContent=status.credentialsAvailable?'SDM credentials are available to the backend. They are never sent to this page.':'Set the server’s credential file or environment variables before connecting to live SDM.';renderInventory(await run('connect',{mode:'demo'}));})();

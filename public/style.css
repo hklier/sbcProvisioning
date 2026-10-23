@@ -8,3 +8,5 @@
 @media(max-width:850px){.hero{flex-direction:column;align-items:stretch}.connection-summary{max-width:none;flex-direction:row;align-items:center;justify-content:flex-start}.hero p{max-width:none}}
 
 .oracle-logo{display:block;width:160px;height:auto;flex-shrink:0}@media(max-width:480px){.oracle-logo{width:130px}}
+
+.success-call-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}#successCallsPanel pre{max-height:380px}#successCallCount{white-space:nowrap}

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import {AppAuth} from './lib/auth.js';
+import {isChangeCall} from './lib/change-calls.js';
 import {targetSipAddresses,sipWithAddress} from './lib/provisioning.js';
 import { SdmClient, readCredentials, redact } from './lib/sdm.js';
 import { DemoClient } from './lib/demo.js';
@@ -34,14 +35,15 @@ function getSession(req,res) {
   }
   session.lastSeen=Date.now(); return session;
 }
-function createJob(session,fn) {
+function createJob(session,fn,{captureChanges=false}={}) {
   if(session.mode==='live' && liveWriter)throw new Error('Another live provisioning/recovery operation is running. Wait before starting a new operation.');
   if([...session.jobs.values()].some(j=>j.status==='running')) throw new Error('Wait for the current operation to finish');
   const job={id:token(),status:'running',logs:[],started:new Date().toISOString()}; session.jobs.set(job.id,job);
   if(session.jobs.size>20) session.jobs.delete(session.jobs.keys().next().value);
-  const client=session.client; client.onLog=entry=>{ if(job.logs.length>=3000) { job.logs.shift(); job.truncated=true; } job.logs.push(redact(entry)); };
+  const changeCalls=[];
+  const client=session.client; client.onLog=entry=>{const safe=redact(entry);if(captureChanges && isChangeCall(safe))changeCalls.push(safe);if(job.logs.length>=3000) { job.logs.shift(); job.truncated=true; } job.logs.push(safe); };
   const live=session.mode==='live';if(live)liveJobs++;
-  Promise.resolve().then(()=>fn(client)).then(result=>{job.result=result;job.status='complete';}).catch(error=>{const secrets=[client.credentials?.password,client.cookie,client.cookie?.split('=')[1]];job.error=redact(error.message,secrets);job.failure=redact({message:error.message,api:error.details,rollback:error.rollback || {status:'not-needed'},completed:error.completed || [],failedCalls:job.logs.filter(l=>l.status==='ERROR' || Number(l.status)>=400).slice(-10)},secrets);job.status='failed';}).finally(()=>{client.onLog=()=>{};if(live)liveJobs--;});
+  Promise.resolve().then(()=>fn(client)).then(result=>{job.result=captureChanges?{...result,changeCalls}:result;job.status='complete';}).catch(error=>{const secrets=[client.credentials?.password,client.cookie,client.cookie?.split('=')[1]];job.error=redact(error.message,secrets);job.failure=redact({message:error.message,api:error.details,rollback:error.rollback || {status:'not-needed'},completed:error.completed || [],failedCalls:job.logs.filter(l=>l.status==='ERROR' || Number(l.status)>=400).slice(-10)},secrets);job.status='failed';}).finally(()=>{client.onLog=()=>{};if(live)liveJobs--;});
   return {jobId:job.id};
 }
 async function inventory(session,client) {
@@ -216,7 +218,7 @@ const server=createServer(async(req,res)=>{
       session.plans.clear();session.plans.set(plan.id,plan);
       return {...plan,steps:[`Lock and snapshot ${plan.deviceIds.length} target(s); automatically restore changed state if any step fails`,...plan.configurations.map(c=>`${c.deviceId}: ${c.operations.length} ${plan.kind==='delete'?'delete':'add/update'} calls → SaveActivateConfig`),...(plan.routes.length?[`Route set: ${plan.routes.length} entry change(s) → push to all selected groups → verify → commit`]:[])]};
     }));
-    if(url.pathname==='/api/apply') {const plan=session.plans.get(input.planId);if(!plan) throw new Error('Generate a preview first');return send(res,202,createJob(session,c=>apply(session,c,plan)));}
+    if(url.pathname==='/api/apply') {const plan=session.plans.get(input.planId);if(!plan) throw new Error('Generate a preview first');return send(res,202,createJob(session,c=>apply(session,c,plan),{captureChanges:true}));}
     return send(res,404,{error:'Not found'});
   } catch(error) {send(res,400,{error:redact(error.message)});}
 });
