@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: sbc-provisioning-data
+  name: sbc-provisioning-data-csi
   annotations:
     argocd.argoproj.io/sync-options: Prune=false
 spec:
   accessModes: [ReadWriteOnce]
-  storageClassName: nfs-client
+  storageClassName: nfs-csi
   resources:
     requests:
       storage: 1Gi

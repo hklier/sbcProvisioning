@@ -63,7 +63,7 @@ Only the Application is bootstrapped imperatively. Argo CD owns the Deployment, 
 
 To roll back, revert the image-reference commit and push. Avoid `kubectl set image` or editing managed objects directly; self-healing will restore the Git version. Source commits alone do not build images: publishing an image and updating its digest are explicit release steps.
 
-The server drains active jobs on SIGTERM, and Kubernetes allows a five-minute termination grace period. Do not plan upgrades during provisioning: sessions, previews and logs are in memory, and a pod restart clears them. Do not scale above one replica until sessions/jobs and the provisioning mutex have shared persistent storage. The sbc-provisioning-data PVC persists the application password hash using the existing nfs-client storage class; jobs and sessions remain in memory. The PVC is excluded from automatic pruning.
+The server drains active jobs on SIGTERM, and Kubernetes allows a five-minute termination grace period. Do not plan upgrades during provisioning: sessions, previews and logs are in memory, and a pod restart clears them. Do not scale above one replica until sessions/jobs and the provisioning mutex have shared persistent storage. The sbc-provisioning-data-csi PVC persists the application password hash using the existing nfs-csi storage class; jobs and sessions remain in memory. The PVC is excluded from automatic pruning.
 
 ## Verification and troubleshooting
 

@@ -91,7 +91,7 @@ spec:
       volumes:
         - name: app-data
           persistentVolumeClaim:
-            claimName: sbc-provisioning-data
+            claimName: sbc-provisioning-data-csi
         - name: sdm-credentials
           secret:
             secretName: sbc-provisioning-sdm
