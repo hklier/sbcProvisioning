@@ -6,3 +6,5 @@
 .hero>div:first-child{flex:1;min-width:0}.hero h1{max-width:850px}.connection-summary{flex-wrap:wrap;justify-content:flex-end;max-width:380px;flex-shrink:0}#passwordError{color:#8a3326;background:#fbece7;padding:12px;line-height:1.5}#passwordDialog .form-actions{justify-content:flex-end}@media(max-width:850px){.hero{align-items:flex-start;gap:18px}.connection-summary{max-width:150px}.hero h1{font-size:28px}.hero .eyebrow{font-size:9px}}
 
 @media(max-width:850px){.hero{flex-direction:column;align-items:stretch}.connection-summary{max-width:none;flex-direction:row;align-items:center;justify-content:flex-start}.hero p{max-width:none}}
+
+.oracle-logo{display:block;width:160px;height:auto;flex-shrink:0}@media(max-width:480px){.oracle-logo{width:130px}}

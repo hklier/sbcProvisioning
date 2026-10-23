@@ -142,9 +142,9 @@ const server=createServer(async(req,res)=>{
     if(shuttingDown && req.method!=='GET') return send(res,503,{error:'Server is stopping; no new operations are accepted'});
     if(!auth(req)) {res.setHeader('WWW-Authenticate','Basic realm="SBC Provisioning"');return send(res,401,{error:'Sign in required'});}
     if(!url.pathname.startsWith('/api/')) {
-      const files={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}; const file=files[url.pathname];
+      const files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/oracle-logo.png':'oracle-logo.png'}; const file=files[url.pathname];
       if(!file || req.method!=='GET') return send(res,404,{error:'Not found'});
-      return send(res,200,fs.readFileSync(path.join(ROOT,'public',file)),file.endsWith('.css')?'text/css':file.endsWith('.js')?'text/javascript':'text/html');
+      return send(res,200,fs.readFileSync(path.join(ROOT,'public',file)),file.endsWith('.png')?'image/png':file.endsWith('.css')?'text/css':file.endsWith('.js')?'text/javascript':'text/html');
     }
     const session=getSession(req,res);
     if(req.method!=='GET' && (req.headers['x-csrf-token']!==session.csrf || (req.headers.origin && new URL(req.headers.origin).host!==req.headers.host))) return send(res,403,{error:'Invalid request token or origin'});
