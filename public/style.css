@@ -2,3 +2,7 @@
  .target-controls>label:not(:first-child){margin-top:12px}#demoFailureLabel{margin-top:20px}#errorDialog{width:min(760px,95vw)}#errorDialog #errorMessage{line-height:1.6}#errorDialog #errorTargets{margin:18px 0}#errorDialog .form-actions{justify-content:flex-end}
 
 #successDialog{width:min(700px,95vw)}.success-message{padding:13px 15px;background:#eaf1e7;border-left:3px solid var(--green);font-size:13px;line-height:1.6}#successDialog .form-actions{justify-content:flex-end}
+
+.hero>div:first-child{flex:1;min-width:0}.hero h1{max-width:850px}.connection-summary{flex-wrap:wrap;justify-content:flex-end;max-width:380px;flex-shrink:0}#passwordError{color:#8a3326;background:#fbece7;padding:12px;line-height:1.5}#passwordDialog .form-actions{justify-content:flex-end}@media(max-width:850px){.hero{align-items:flex-start;gap:18px}.connection-summary{max-width:150px}.hero h1{font-size:28px}.hero .eyebrow{font-size:9px}}
+
+@media(max-width:850px){.hero{flex-direction:column;align-items:stretch}.connection-summary{max-width:none;flex-direction:row;align-items:center;justify-content:flex-start}.hero p{max-width:none}}

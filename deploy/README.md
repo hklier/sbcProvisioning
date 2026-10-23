@@ -9,7 +9,7 @@ The cluster deployment uses a single replica in namespace `sbc-provisioning`. Ar
 - Argo CD: [sbc-provisioning](https://192.168.2.243/applications/argocd/sbc-provisioning).
 - Registry: `192.168.2.240:5000`; the existing cluster registry uses HTTP.
 - Load balancer: existing MetalLB `registry-pool`, with `192.168.2.250` assigned to this Service.
-- Application login: `admin`; the deployment-specific password is in the `sbc-provisioning-auth` Secret, not in this repository.
+- Application login: `admin`; the initial password is in the `sbc-provisioning-auth` Secret. After an in-app password change, the persisted hash on the password PVC takes precedence.
 
 The app serves HTTPS directly using the `sbc-provisioning-tls` Secret and sets Secure session cookies. The lab certificate is self-signed, with SANs for the app IP, localhost, and service DNS. Replace it with an internal-PKI certificate if desired, then restart the app to load the replacement.
 
@@ -63,7 +63,7 @@ Only the Application is bootstrapped imperatively. Argo CD owns the Deployment, 
 
 To roll back, revert the image-reference commit and push. Avoid `kubectl set image` or editing managed objects directly; self-healing will restore the Git version. Source commits alone do not build images: publishing an image and updating its digest are explicit release steps.
 
-The server drains active jobs on SIGTERM, and Kubernetes allows a five-minute termination grace period. Do not plan upgrades during provisioning: sessions, previews and logs are in memory, and a pod restart clears them. Do not scale above one replica until sessions/jobs and the provisioning mutex have shared persistent storage. No PVC is needed by this version.
+The server drains active jobs on SIGTERM, and Kubernetes allows a five-minute termination grace period. Do not plan upgrades during provisioning: sessions, previews and logs are in memory, and a pod restart clears them. Do not scale above one replica until sessions/jobs and the provisioning mutex have shared persistent storage. The sbc-provisioning-data PVC persists the application password hash using the existing nfs-client storage class; jobs and sessions remain in memory. The PVC is excluded from automatic pruning.
 
 ## Verification and troubleshooting
 

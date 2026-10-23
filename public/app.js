@@ -135,10 +135,23 @@ $('applyPlan').addEventListener('click',action(async()=>{if(!state.plan)throw ne
 $('discardPlan').addEventListener('click',invalidate);
 $('refresh').addEventListener('click',action(async()=>{invalidate();renderInventory(await run('inventory',{}));notice('Inventory refreshed.');}));
 $('connectionButton').addEventListener('click',()=>{$('connectionMode').value=state.connection;$('connectionDialog').showModal();});$('closeConnection').addEventListener('click',()=>$('connectionDialog').close());
+$('passwordButton').addEventListener('click',()=>{$('passwordForm').reset();$('passwordForm').hidden=false;$('passwordChanged').hidden=true;$('passwordError').hidden=true;$('passwordDialog').showModal();});
+$('closePassword').addEventListener('click',()=>$('passwordDialog').close());
+$('passwordDialog').addEventListener('close',()=>$('passwordForm').reset());
+$('signInAgain').addEventListener('click',()=>location.reload());
+$('passwordForm').addEventListener('submit',async event=>{
+  event.preventDefault();const data=Object.fromEntries(new FormData($('passwordForm')));
+  $('passwordError').hidden=true;
+  if(data.newPassword!==data.confirmPassword){$('passwordError').textContent='New passwords do not match.';$('passwordError').hidden=false;return;}
+  setBusy(true);
+  try{await api('password',data);invalidate();$('passwordForm').reset();$('passwordForm').hidden=true;$('passwordChanged').hidden=false;}
+  catch(error){$('passwordForm').reset();$('passwordError').textContent=error.message;$('passwordError').hidden=false;}
+  finally{setBusy(false);}
+});
 $('connectionForm').addEventListener('submit',action(async()=>{const input={mode:$('connectionMode').value,labTls:$('connectionForm').elements.labTls.checked};$('connectionDialog').close();invalidate();renderInventory(await run('connect',input));notice(input.mode==='live'?'Connected to live SDM. Inventory read successfully.':'Demo connected. No requests are sent to SDM.');}));
 $('closeEditor').addEventListener('click',()=>$('editorDialog').close());
 $('previewEdit').addEventListener('click',action(async()=>{const object=JSON.parse($('objectEditor').value);const input=state.editor.kind==='route'?{kind:'routeEdit',scope:'lrt',deviceIds:selectedTargets(),routeSetId:$('searchRouteSet').value,entryId:object.objectId,route:object}:{kind:'edit',scope:'config',deviceIds:selectedTargets(),object};$('editorDialog').close();showPlan(await run('preview',input));}));
 $('clearLog').addEventListener('click',()=>{state.logs=[];$('activityLog').replaceChildren(el('p','Activity cleared.','help'));$('callCount').textContent='0 calls';});
 $('exportLog').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(state.logs,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download=`sbc-rest-activity-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 renderAgents();updateDerived();
-action(async()=>{const status=await api('status');state.csrf=status.csrf;$('baseUrl').value=status.baseUrl;$('credentialState').textContent=status.credentialsAvailable?'SDM credentials are available to the backend. They are never sent to this page.':'Set the server’s credential file or environment variables before connecting to live SDM.';renderInventory(await run('connect',{mode:'demo'}));})();
+action(async()=>{const status=await api('status');state.csrf=status.csrf;$('baseUrl').value=status.baseUrl;$('passwordUsername').defaultValue=status.appUsername;$('passwordButton').disabled=!status.passwordChangeAvailable;$('passwordButton').title=status.passwordChangeAvailable?'Change your application login password':'Password changes require application login and persistent password storage';$('credentialState').textContent=status.credentialsAvailable?'SDM credentials are available to the backend. They are never sent to this page.':'Set the server’s credential file or environment variables before connecting to live SDM.';renderInventory(await run('connect',{mode:'demo'}));})();

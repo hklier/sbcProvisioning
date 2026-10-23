@@ -3,3 +3,6 @@
 *-cred*.txt
 *secret*
 node_modules/
+
+password.json
+password.json.*.tmp

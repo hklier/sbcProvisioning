@@ -3,7 +3,8 @@ import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import {AppAuth} from './lib/auth.js';
 import { SdmClient, readCredentials, redact } from './lib/sdm.js';
 import { DemoClient } from './lib/demo.js';
 import { prepareDeletion } from './lib/deletion.js';
@@ -14,14 +15,13 @@ import { TYPES, generate, selector, matches, routeMatches, configRoot, cleanConf
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 const BASE=process.env.SDM_BASE_URL || 'https://192.168.3.153:8443/rest/v1.3';
 const CREDENTIALS=process.env.SDM_CREDENTIALS_FILE || path.resolve(ROOT,'../vf-ro-provisioning/sdm-rest-api-cred.txt');
+const appAuth=new AppAuth({username:process.env.APP_USERNAME || 'admin',password:process.env.APP_PASSWORD || '',file:process.env.APP_PASSWORD_FILE || ''});
 const sessions=new Map(); let liveWriter=false; let liveJobs=0; let shuttingDown=false;
 const token=()=>randomBytes(24).toString('hex');
 function send(res,status,body,type='application/json; charset=utf-8') { res.writeHead(status,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",'Referrer-Policy':'no-referrer'}); res.end(type.startsWith('application/json')?JSON.stringify(body):body); }
 async function body(req) { let text=''; for await(const chunk of req) { text+=chunk; if(text.length>1024*1024) throw new Error('Request exceeds 1 MB'); } return JSON.parse(text || '{}'); }
 function auth(req) {
-  if(!process.env.APP_PASSWORD) return true;
-  const expected=Buffer.from('Basic '+Buffer.from(`${process.env.APP_USERNAME || 'admin'}:${process.env.APP_PASSWORD}`).toString('base64'));
-  const actual=Buffer.from(req.headers.authorization || ''); return expected.length===actual.length && timingSafeEqual(expected,actual);
+  return appAuth.accepts(req.headers.authorization);
 }
 function getSession(req,res) {
   const cookie=(req.headers.cookie || '').match(/(?:^|;\s*)provisionSession=([a-f0-9]+)/)?.[1];
@@ -148,11 +148,17 @@ const server=createServer(async(req,res)=>{
     }
     const session=getSession(req,res);
     if(req.method!=='GET' && (req.headers['x-csrf-token']!==session.csrf || (req.headers.origin && new URL(req.headers.origin).host!==req.headers.host))) return send(res,403,{error:'Invalid request token or origin'});
-    if(req.method==='GET' && url.pathname==='/api/status') return send(res,200,{mode:session.mode,csrf:session.csrf,baseUrl:BASE,credentialsAvailable:fs.existsSync(CREDENTIALS) || !!(process.env.SDM_USERNAME && process.env.SDM_PASSWORD),verifyTls:session.mode==='live'?session.client.verifyTls:true});
+    if(req.method==='GET' && url.pathname==='/api/status') return send(res,200,{mode:session.mode,csrf:session.csrf,baseUrl:BASE,passwordChangeAvailable:appAuth.canChange,appUsername:appAuth.record?.username || '',credentialsAvailable:fs.existsSync(CREDENTIALS) || !!(process.env.SDM_USERNAME && process.env.SDM_PASSWORD),verifyTls:session.mode==='live'?session.client.verifyTls:true});
     const jobMatch=url.pathname.match(/^\/api\/jobs\/([a-f0-9]+)$/);
     if(req.method==='GET' && jobMatch) { const job=session.jobs.get(jobMatch[1]);return send(res,job?200:404,job || {error:'Job not found'}); }
     if(req.method!=='POST') return send(res,404,{error:'Not found'});
     const input=await body(req);
+    if(url.pathname==='/api/password') {
+      if([...sessions.values()].some(s=>[...s.jobs.values()].some(j=>j.status==='running')))throw new Error('Wait for all running operations to finish before changing the password');
+      appAuth.change(input);
+      for(const s of sessions.values())s.plans.clear();
+      return send(res,200,{message:'Password changed. Sign in again using your new password.'});
+    }
     if(url.pathname==='/api/connect') {
       if([...session.jobs.values()].some(j=>j.status==='running')) throw new Error('Wait for the current operation');
       if(input.mode!=='demo' && input.mode!=='live') throw new Error('Invalid connection mode');

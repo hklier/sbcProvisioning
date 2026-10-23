@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {fileURLToPath} from 'node:url';
+import {AppAuth} from '../lib/auth.js';
+const basic=password=>'Basic '+Buffer.from('admin:'+password).toString('base64');
+test('password rotation persists only a salted hash, rejects old login and survives restart',t=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'sbc-auth-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const file=path.join(directory,'password.json'),password='test-initial-password',next='test-next-password';
+  const auth=new AppAuth({password,file});assert.ok(auth.accepts(basic(password)));
+  assert.throws(()=>auth.change({currentPassword:'wrong',newPassword:next,confirmPassword:next}),/incorrect/);
+  assert.throws(()=>auth.change({currentPassword:password,newPassword:'short',confirmPassword:'short'}),/12 to 256/);
+  assert.throws(()=>auth.change({currentPassword:password,newPassword:next,confirmPassword:'mismatch'}),/do not match/);
+  assert.equal(fs.existsSync(file),false);
+  auth.change({currentPassword:password,newPassword:next,confirmPassword:next});
+  const saved=fs.readFileSync(file,'utf8');assert.ok(!saved.includes(password) && !saved.includes(next));
+  assert.equal(auth.accepts(basic(password)),false);assert.ok(auth.accepts(basic(next)));
+  const restarted=new AppAuth({password,file});assert.ok(restarted.accepts(basic(next)));assert.equal(restarted.accepts(basic(password)),false);
+  assert.throws(()=>new AppAuth({password}).change({}),/persistent/);
+});
+test('password API requires authentication and CSRF, changes application login without exposing secrets',async t=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'sbc-auth-api-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const password='test-initial-password',next='test-next-password';
+  const child=spawn(process.execPath,['server.js'],{cwd:fileURLToPath(new URL('..',import.meta.url)),env:{...process.env,PORT:'0',HOST:'127.0.0.1',APP_PASSWORD:password,APP_PASSWORD_FILE:path.join(directory,'password.json')},stdio:['ignore','pipe','pipe']});
+  t.after(async()=>{child.kill();await once(child,'exit');});
+  const [output]=await once(child.stdout,'data');const base=String(output).match(/http:\/\/127\.0\.0\.1:\d+/)[0];
+  assert.equal((await fetch(base+'/api/status')).status,401);
+  const initial=await fetch(base+'/api/status',{headers:{Authorization:basic(password)}}),state=await initial.json(),cookie=initial.headers.get('set-cookie').split(';')[0];assert.equal(state.passwordChangeAvailable,true);
+  const change=(csrf,current=password)=>fetch(base+'/api/password',{method:'POST',headers:{Authorization:basic(password),Cookie:cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({currentPassword:current,newPassword:next,confirmPassword:next})});
+  assert.equal((await change('wrong')).status,403);assert.equal((await change(state.csrf,'wrong')).status,400);
+  const changed=await change(state.csrf);assert.equal(changed.status,200);const text=await changed.text();assert.ok(!text.includes(password) && !text.includes(next));
+  assert.equal((await fetch(base+'/api/status',{headers:{Authorization:basic(password)}})).status,401);
+  assert.equal((await fetch(base+'/api/status',{headers:{Authorization:basic(next)}})).status,200);
+});
