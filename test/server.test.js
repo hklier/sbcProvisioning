@@ -29,9 +29,22 @@ test('web API: CSRF, preview/apply, search, OL agents, LRT update and consumed p
   const denied=await run('preview',missingAssociation);assert.equal(denied.status,'failed');assert.match(denied.error,/not associated/);
   const associationPlan=await run('preview',{...missingAssociation,associateTarget:true});assert.equal(associationPlan.status,'complete',associationPlan.error);assert.equal(associationPlan.result.associations[0].body.assocDevices[0].deviceGroupId,'ID12');
   const associationApplied=await run('apply',{planId:associationPlan.result.id});assert.equal(associationApplied.status,'complete',associationApplied.error);assert.ok(associationApplied.logs.some(l=>l.request?.assocDevices?.[0]?.deviceGroupId==='ID12'));
-  const both={...input,configAction:'create',bgid:'9876543210',scope:'config',deviceIds:['ID8','ID6'],includeLrt:false,demoFailure:'activate-second'};
+  const both={...input,configAction:'create',bgid:'9876543210',scope:'config',deviceIds:['ID8','ID6'],sipAddresses:{ID8:'10.229.189.129',ID6:'10.229.189.130'},includeLrt:false,demoFailure:'activate-second'};
+  for(const sipAddresses of [undefined,{ID8:'10.229.189.129'},{ID8:'10.229.189.129',ID6:'bad-ip'},{ID8:'10.229.189.129',ID6:'10.229.189.129'}]) {
+    const denied=await run('preview',{...both,sipAddresses});assert.equal(denied.status,'failed');assert.match(denied.error,/SIP interface IP/);assert.ok(denied.logs.every(l=>l.method==='GET'),'invalid addresses are rejected before staging requests');
+  }
   const bothPreview=await run('preview',both);assert.equal(bothPreview.status,'complete',bothPreview.error);
+  const ips=object=>(object.childrenElements || []).filter(c=>c.elementTypePath==='sipInterface/sipPort').map(c=>c.attributes.find(a=>a.name==='address').value);
+  for(const c of bothPreview.result.configurations)assert.deepEqual(ips(c.operations.find(o=>o.body.elementTypePath==='sipInterface').body),[both.sipAddresses[c.deviceId],both.sipAddresses[c.deviceId]]);
   const failed=await run('apply',{planId:bothPreview.result.id});assert.equal(failed.status,'failed');assert.equal(failed.failure.rollback.status,'restored');assert.equal(failed.failure.rollback.devices.length,2);assert.ok(failed.failure.failedCalls.length);
   const again=await run('preview',{...both,demoFailure:''});assert.equal(again.status,'complete',again.error);assert.equal((await run('apply',{planId:again.result.id})).status,'complete');
+  const addresses={ID8:'10.229.189.131',ID6:'10.229.189.132'};
+  const updated=await run('preview',{...both,configAction:'update',sipAddresses:addresses,demoFailure:''});assert.equal(updated.status,'complete',updated.error);
+  assert.ok(updated.result.configurations.every(c=>c.operations.every(o=>o.path.endsWith('/update'))));assert.equal((await run('apply',{planId:updated.result.id})).status,'complete');
+  const findSip=async deviceId=>{const search=await run('search',{deviceId,mode:'OC',type:'sipInterface',filter:both.bgid});assert.equal(search.status,'complete',search.error);return search.result.objects[0];};
+  for(const deviceId of both.deviceIds)assert.deepEqual(ips(await findSip(deviceId)),[addresses[deviceId],addresses[deviceId]]);
+  const edit=await run('preview',{kind:'edit',scope:'config',deviceIds:both.deviceIds,object:await findSip('ID8'),sipAddresses:{ID8:'10.229.189.141',ID6:'10.229.189.142'},demoFailure:'activate-second'});assert.equal(edit.status,'complete',edit.error);
+  const editFailed=await run('apply',{planId:edit.result.id});assert.equal(editFailed.status,'failed');assert.equal(editFailed.failure.rollback.status,'restored');
+  for(const deviceId of both.deviceIds)assert.deepEqual(ips(await findSip(deviceId)),[addresses[deviceId],addresses[deviceId]],'rollback restores each device original address');
   const deletion=await run('preview',{kind:'delete',mode:'OC',filter:'9876543210',scope:'config',deviceIds:['ID8','ID6']});assert.equal(deletion.status,'complete',deletion.error);assert.equal(deletion.result.configurations[0].operations.length,2);assert.ok(deletion.result.configurations.every(c=>c.operations.every(o=>o.path.endsWith('/delete'))));assert.equal((await run('apply',{planId:deletion.result.id})).status,'complete');
 });

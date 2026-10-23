@@ -3,6 +3,8 @@ const form=$('provisionForm');
 const state={mode:'OC',connection:'demo',csrf:'',devices:[],routeSets:[],logs:[],plan:null,busy:false,editor:null};
 const field=name=>form.elements.namedItem(name);
 const selectedTargets=()=>[$('device').value,$('device2').value].filter(Boolean);
+const targetName=id=>{const d=state.devices.find(d=>d.id===id);return d?`${d.name} (${d.id})`:id || 'Select an SBC target';};
+function sipDetails(object) {return object?.elementTypePath==='sipInterface'?(object.childrenElements || []).filter(c=>c.elementTypePath==='sipInterface/sipPort').map(c=>{const a=Object.fromEntries((c.attributes || []).map(a=>[a.name,a.value]));return `${a.address?.includes(':')?'['+a.address+']':a.address}:${a.port} ${a.transProtocol}`;}).join(' · '):'';}
 function showError(error) {
   const detail=error.failure || {message:error.message,rollback:{status:'unavailable'}};
   $('errorMessage').textContent=error.message;
@@ -26,6 +28,7 @@ function showSuccess(plan) {
       const key=object.attributes?.find(a=>['id','RealmID','hostname','name'].includes(a.name))?.value || 'customer policy';
       const verb=op.path.endsWith('/delete')?'Deleted':op.path.endsWith('/add')?'Created':'Updated';
       summary.append(el('div',`${verb} ${labels[object.elementTypePath] || object.elementTypePath} · ${key}`,'plan-step'));
+      const sip=sipDetails(object);if(sip)summary.append(el('p',sip,'help'));
     }
     summary.append(el('p','Configuration saved and activated.','help'));
   }
@@ -69,6 +72,9 @@ async function run(path,data) {
 }
 const action=fn=>async event=>{event?.preventDefault();try{await fn(event);}catch(e){notice(e.message,true);showError(e);}};
 function updateDerived() {
+  const sipEnabled=state.mode==='OC' && field('scope').value!=='lrt',second=sipEnabled && Boolean($('device2').value);
+  $('sipAddress2Label').hidden=!second;field('sipAddress2').disabled=!second;field('sipAddress2').required=second;field('sipAddress').required=sipEnabled;
+  $('sipTarget1').textContent=targetName($('device').value);$('sipTarget2').textContent=targetName($('device2').value);
   $('ocRealm').value='core-oc-bgid'+field('bgid').value.trim();$('olRealm').value=field('customerIdentifier').value.trim()+'-access';
   const prefix=state.mode==='OC'?field('bgid').value:field('lrtCustomerId').value+field('numberLength').value;
   $('rangePreview').textContent=`${prefix}${field('rangeStart').value} → ${prefix}${field('rangeEnd').value}`;
@@ -97,16 +103,17 @@ function renderInventory(result) {
   for(const name of ['routeSet','searchRouteSet']) {const select=$(name);const previous=select.value;select.replaceChildren();if(name==='searchRouteSet'){const empty=el('option','Skip LRT search');empty.value='';select.append(empty);}for(const set of state.routeSets){const option=el('option',`${set.name} · ${set.routeSetId}${String(set.lockState)==='true'?' · locked by '+(set.lockOwner || 'another session'):''}`);option.value=set.routeSetId;select.append(option);}if(state.routeSets.some(r=>String(r.routeSetId)===previous))select.value=previous;}
   chooseRouteSet();$('connectionBadge').textContent=state.connection==='demo'?'Demo environment':'Live SDM';$('connectionBadge').className='badge'+(state.connection==='live'?' live':'');$('environment').className='environment'+(state.connection==='live'?' live':'');
   $('environmentText').textContent=state.connection==='demo'?'Demo mode · Changes stay in this browser session’s simulated SDM.':`Live SDM · ${$('baseUrl').value} · Preview changes before applying${$('connectionForm').elements.labTls.checked?' · Lab TLS verification disabled':''}`;
+  updateDerived();
 }
 function readInput() {
-  const data=Object.fromEntries(new FormData(form));return {...data,associateTarget:field('associateTarget').checked,mode:state.mode,deviceIds:selectedTargets(),includeLrt:data.scope!=='config',networkInterface:state.mode==='OC'?data.ocNetwork:data.olNetwork,agentIps:[...$('agents').querySelectorAll('input')].map(n=>n.value.trim())};
+  const data=Object.fromEntries(new FormData(form));return {...data,sipAddresses:Object.fromEntries([[$('device').value,data.sipAddress],...($('device2').value?[[$('device2').value,data.sipAddress2]]:[])]),associateTarget:field('associateTarget').checked,mode:state.mode,deviceIds:selectedTargets(),includeLrt:data.scope!=='config',networkInterface:state.mode==='OC'?data.ocNetwork:data.olNetwork,agentIps:[...$('agents').querySelectorAll('input')].map(n=>n.value.trim())};
 }
 function showPlan(plan) {
   state.plan=plan;$('previewCard').hidden=false;$('previewBadge').textContent=state.connection==='demo'?'Demo preview':'Live SDM preview';$('previewBadge').className='badge'+(state.connection==='live'?' live':'');
   const summary=$('planSummary');summary.replaceChildren();
   for(const step of plan.steps)summary.append(el('div',step,'plan-step'));
   for(const op of plan.associations || [])summary.append(el('div',`ASSOCIATE SBC GROUP · ${op.body.assocDevices.map(a=>a.deviceGroupId).join(', ')} · route set ${plan.routeSetId}`,'plan-step'));
-  for(const config of plan.configurations)for(const op of config.operations){const key=op.body.attributes?.find(a=>['id','RealmID','hostname','name'].includes(a.name))?.value || 'local policy';summary.append(el('div',`${config.deviceId} · ${op.path.endsWith('/delete')?'DELETE':op.path.endsWith('/add')?'ADD':'UPDATE'} · ${op.body.elementTypePath} · ${key}`,'plan-step'));}
+  for(const config of plan.configurations)for(const op of config.operations){const key=op.body.attributes?.find(a=>['id','RealmID','hostname','name'].includes(a.name))?.value || 'local policy';summary.append(el('div',`${targetName(config.deviceId)} · ${op.path.endsWith('/delete')?'DELETE':op.path.endsWith('/add')?'ADD':'UPDATE'} · ${op.body.elementTypePath} · ${key}`,'plan-step'));const sip=sipDetails(op.body.childrenElements?.length?op.body:op.before);if(sip)summary.append(el('p',sip,'help'));}
   for(const op of plan.routes || [])summary.append(el('div',`${op.method==='DELETE'?'DELETE':op.method==='PUT'?'UPDATE':'ADD'} LRT · ${(op.body || op.before).rangeStart} → ${(op.body || op.before).rangeEnd}`,'plan-step'));
   for(const warning of plan.warnings || [])summary.append(el('p',warning,'warning'));
   $('planJson').textContent=JSON.stringify(plan,null,2);$('applyPlan').textContent=state.connection==='demo'?'Apply in demo':'Apply to live SBC';$('previewCard').scrollIntoView({behavior:'smooth',block:'start'});
@@ -114,7 +121,7 @@ function showPlan(plan) {
   if(plan.kind==='delete')$('applyPlan').textContent=state.connection==='demo'?'Delete in demo':'Delete previewed customer data';
 }
 function view(name) {document.querySelectorAll('[data-view]').forEach(n=>n.classList.toggle('active',n.dataset.view===name));$('provisionView').hidden=name!=='provision';$('searchView').hidden=name!=='search';}
-function openEditor(object,kind) {state.editor={kind};$('editorTitle').textContent=kind==='route'?'Inspect / edit LRT entry':'Inspect / edit configuration';$('objectEditor').value=JSON.stringify(object,null,2);$('editorDialog').showModal();}
+function openEditor(object,kind) {state.editor={kind};$('editorTitle').textContent=kind==='route'?'Inspect / edit LRT entry':'Inspect / edit configuration';$('objectEditor').value=JSON.stringify(object,null,2);const perTarget=kind==='config' && object.elementTypePath==='sipInterface' && selectedTargets().length>1;$('editorSipFields').hidden=!perTarget;$('editorTarget1').textContent=targetName($('device').value);$('editorTarget2').textContent=targetName($('device2').value);$('editorSip1').value=object.childrenElements?.find(c=>c.elementTypePath==='sipInterface/sipPort')?.attributes?.find(a=>a.name==='address')?.value || '';$('editorSip2').value=field('sipAddress2').value;$('editorDialog').showModal();}
 function showResults(result) {
   const root=$('searchResults');root.replaceChildren(el('div',`${result.objects.length} configuration objects · ${result.routes.length} LRT entries`,'count-heading'));
   if(!result.objects.length && !result.routes.length)root.append(el('p','No matching entries found. Check the service, target device and numeric LRT prefix.','help'));
@@ -125,8 +132,8 @@ function showResults(result) {
 document.querySelectorAll('[data-mode]').forEach(n=>n.addEventListener('click',()=>selectMode(n.dataset.mode)));
 document.querySelectorAll('[data-view]').forEach(n=>n.addEventListener('click',()=>view(n.dataset.view)));
 form.addEventListener('input',()=>{invalidate();updateDerived();});form.addEventListener('change',()=>{invalidate();updateDerived();});field('agentCount').addEventListener('change',renderAgents);
-$('device').addEventListener('change',invalidate);$('searchForm').addEventListener('input',invalidate);$('searchForm').addEventListener('change',invalidate);
-$('device2').addEventListener('change',invalidate);$('closeError').addEventListener('click',()=>$('errorDialog').close());
+$('device').addEventListener('change',()=>{invalidate();updateDerived();});$('searchForm').addEventListener('input',invalidate);$('searchForm').addEventListener('change',invalidate);
+$('device2').addEventListener('change',()=>{invalidate();updateDerived();});$('closeError').addEventListener('click',()=>$('errorDialog').close());
 $('closeSuccess').addEventListener('click',()=>$('successDialog').close());
 form.addEventListener('submit',action(async()=>showPlan(await run('preview',readInput()))));
 $('searchForm').addEventListener('submit',action(async()=>{invalidate();const input=Object.fromEntries(new FormData($('searchForm')));showResults(await run('search',{...input,mode:state.mode,deviceId:$('device').value}));}));
@@ -150,7 +157,7 @@ $('passwordForm').addEventListener('submit',async event=>{
 });
 $('connectionForm').addEventListener('submit',action(async()=>{const input={mode:$('connectionMode').value,labTls:$('connectionForm').elements.labTls.checked};$('connectionDialog').close();invalidate();renderInventory(await run('connect',input));notice(input.mode==='live'?'Connected to live SDM. Inventory read successfully.':'Demo connected. No requests are sent to SDM.');}));
 $('closeEditor').addEventListener('click',()=>$('editorDialog').close());
-$('previewEdit').addEventListener('click',action(async()=>{const object=JSON.parse($('objectEditor').value);const input=state.editor.kind==='route'?{kind:'routeEdit',scope:'lrt',deviceIds:selectedTargets(),routeSetId:$('searchRouteSet').value,entryId:object.objectId,route:object}:{kind:'edit',scope:'config',deviceIds:selectedTargets(),object};$('editorDialog').close();showPlan(await run('preview',input));}));
+$('previewEdit').addEventListener('click',action(async()=>{const object=JSON.parse($('objectEditor').value);const input=state.editor.kind==='route'?{kind:'routeEdit',scope:'lrt',deviceIds:selectedTargets(),routeSetId:$('searchRouteSet').value,entryId:object.objectId,route:object}:{kind:'edit',scope:'config',deviceIds:selectedTargets(),object,...(!$('editorSipFields').hidden?{sipAddresses:{[$('device').value]:$('editorSip1').value,[$('device2').value]:$('editorSip2').value}}:{})};$('editorDialog').close();showPlan(await run('preview',input));}));
 $('clearLog').addEventListener('click',()=>{state.logs=[];$('activityLog').replaceChildren(el('p','Activity cleared.','help'));$('callCount').textContent='0 calls';});
 $('exportLog').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(state.logs,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download=`sbc-rest-activity-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 renderAgents();updateDerived();

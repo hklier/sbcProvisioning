@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import {AppAuth} from './lib/auth.js';
+import {targetSipAddresses,sipWithAddress} from './lib/provisioning.js';
 import { SdmClient, readCredentials, redact } from './lib/sdm.js';
 import { DemoClient } from './lib/demo.js';
 import { prepareDeletion } from './lib/deletion.js';
@@ -81,18 +82,29 @@ async function prepare(session,client,input) {
     }
     return {...deletion,route:null,routeBaselineVerified,associations:[],deviceIds:devices.map(d=>d.id),groupIds,routeSetId:input.routeSetId || ''};
   }
-  let generated;
+  let generated;const perTarget=new Map();
   if(input.kind==='routeEdit') {
     const r=input.route;
     if(!r || !/^\d+$/.test(r.rangeStart) || !/^\d+$/.test(r.rangeEnd) || r.rangeStart.length!==r.rangeEnd.length || BigInt(r.rangeStart)>BigInt(r.rangeEnd) || typeof r.sed!=='string' || !r.sed.trim()) throw new Error('LRT edit requires valid equal-length numeric endpoints and a nonempty sed expression');
     if(!input.entryId) throw new Error('Select an existing LRT entry to edit');
     generated={objects:[],route:{...r},warnings:['Manual LRT update. Keys and routing expression are used exactly as entered.']}; delete generated.route.objectId;
-  } else generated=input.kind==='edit' ? {objects:[input.object],route:null,warnings:['Manual object update. Review all attributes before applying.']} : generate(input);
+  } else if(input.kind==='edit') {
+    generated={objects:[input.object],route:null,warnings:['Manual object update. Review all attributes before applying.']};
+    if(input.object?.elementTypePath==='sipInterface' && devices.length>1) {
+      const addresses=targetSipAddresses(input,devices.map(d=>d.id));
+      for(const device of devices)perTarget.set(device.id,{objects:[sipWithAddress(input.object,addresses.get(device.id))]});
+      generated.warnings.push('Each target uses its selected SIP interface IP for all SIP ports in this edit.');
+    }
+  } else {
+    const addresses=input.mode==='OC' && input.scope!=='lrt'?targetSipAddresses(input,devices.map(d=>d.id)):null;
+    for(const device of devices)perTarget.set(device.id,generate(addresses?{...input,sipAddress:addresses.get(device.id)}:input));
+    generated=perTarget.get(devices[0].id);
+  }
   if(input.kind==='edit') { selector(input.object); if(!Array.isArray(input.object.attributes)) throw new Error('Invalid configuration element'); }
   const configurations=[];
   if(input.scope!=='lrt') for(const device of devices) {
     await cleanConfig(client,device.id);
-    configurations.push({deviceId:device.id,operations:await resolveObjects(client,device.id,generated.objects,input.kind==='edit'?'update':input.configAction || 'create')});
+    configurations.push({deviceId:device.id,operations:await resolveObjects(client,device.id,(perTarget.get(device.id) || generated).objects,input.kind==='edit'?'update':input.configAction || 'create')});
   }
   const route=await routeOperation(session,client,input,generated.route);
   if(input.scope==='lrt' && !route) throw new Error('Enable LRT to prepare an LRT-only change');

@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { generate,attr,element,merge,selector,locked,applyConfig,deployRoutes,resolveRoute,resolveObjects } from '../lib/provisioning.js';
 import { SdmClient,redact } from '../lib/sdm.js';
+import {targetSipAddresses} from '../lib/provisioning.js';
+test('per-target SIP address validation accepts IPv4/IPv6 and detects equivalent IPv6 duplicates',()=>{
+  assert.equal(targetSipAddresses({sipAddress:'10.0.0.1'},['ID8']).get('ID8'),'10.0.0.1');
+  assert.equal(targetSipAddresses({sipAddresses:{ID8:'2001:db8::1',ID6:'2001:db8::2'}},['ID8','ID6']).get('ID6'),'2001:db8::2');
+  assert.throws(()=>targetSipAddresses({sipAddresses:{ID8:'2001:db8::1',ID6:'2001:0db8:0:0:0:0:0:1'}},['ID8','ID6']),/different/);
+});
 const oc={mode:'OC',bgid:'1227100253',sipPort:'6000',sipAddress:'10.229.189.129',includeLrt:true,routeSetId:'2',rangeStart:'371542577',rangeEnd:'371542579'};
 const ol={mode:'OL',customerIdentifier:'N529704BUCPE4',customerCli:'372818574',lrtCustomerId:'152970402130004',agentIps:['172.22.250.226','172.22.250.227','172.22.250.228','172.22.250.229'],includeLrt:true,routeSetId:'3',numberLength:'9',rangeStart:'372818574',rangeEnd:'372818576'};
 test('new configuration elements are sent to POST /add for all supported types',async()=>{
