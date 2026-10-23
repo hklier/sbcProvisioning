@@ -63,7 +63,7 @@ Only the Application is bootstrapped imperatively. Argo CD owns the Deployment, 
 
 To roll back, revert the image-reference commit and push. Avoid `kubectl set image` or editing managed objects directly; self-healing will restore the Git version. Source commits alone do not build images: publishing an image and updating its digest are explicit release steps.
 
-The server drains active jobs on SIGTERM, and Kubernetes allows a five-minute termination grace period. Do not plan upgrades during provisioning: sessions, previews and logs are in memory, and a pod restart clears them. Do not scale above one replica until sessions/jobs and the provisioning mutex have shared persistent storage. The sbc-provisioning-data-csi PVC persists the application password hash using the existing nfs-csi storage class; jobs and sessions remain in memory. The PVC is excluded from automatic pruning.
+The server drains active jobs on SIGTERM, and Kubernetes allows a five-minute termination grace period. Do not plan upgrades during provisioning: sessions, previews and logs are in memory, and a pod restart clears them. Do not scale above one replica until sessions/jobs and the provisioning mutex have shared persistent storage. The sbc-provisioning-data-local PVC persists the application password hash using the existing hostpath storage class; jobs and sessions remain in memory. The PVC is excluded from automatic pruning.
 
 ## Verification and troubleshooting
 
@@ -72,3 +72,5 @@ Health probes use HTTPS on port 9080; the Service exposes port 443. A request to
 Check `kubectl -n sbc-provisioning describe pod POD` for missing Secrets, image-pull failures or probe failures. Container logs contain startup/job-drain notices, not SDM passwords. The pod must reach SDM `192.168.3.153:8443` and the nodes must be able to pull from the existing registry. Connecting to the supplied SDM IP still needs the app's explicit lab-certificate option because the SDM certificate does not cover that IP.
 
 The public Git repository contains application code, sample/demo values and non-secret deployment manifests. It does not contain app passwords, SDM credential files, SSH keys, TLS private keys or Git tokens.
+
+The password volume uses the lab's hostpath provisioner on k8s-worker1. The Deployment is pinned to that worker because this provisioner does not add PV node affinity. Password changes survive container/pod restarts, but the app requires this worker and its storage to be available. Back up the password hash volume; it is not replicated storage.

@@ -16,6 +16,8 @@ spec:
       labels:
         app.kubernetes.io/name: sbc-provisioning
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-worker1
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 300
       securityContext:
@@ -91,7 +93,7 @@ spec:
       volumes:
         - name: app-data
           persistentVolumeClaim:
-            claimName: sbc-provisioning-data-csi
+            claimName: sbc-provisioning-data-local
         - name: sdm-credentials
           secret:
             secretName: sbc-provisioning-sdm
