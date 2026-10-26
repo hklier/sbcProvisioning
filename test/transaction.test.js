@@ -46,7 +46,7 @@ test('LRT push failure restores deleted entries, both SBC configurations and dev
 });
 test('failed restoration is reported as incomplete while recovery continues for the other target',async()=>{
   const client=new DemoClient(()=>{});const p=await plan(client);const request=client.request.bind(client);let triggered=false;
-  client.request=async(m,path,b)=>{if(path==='/configuration/devices/ID6/action' && !triggered){triggered=true;throw new Error('activation failed');}if(triggered && path==='/configuration/devices/ID6/action')throw new Error('recovery unavailable');return request(m,path,b);};
+  client.request=async(m,path,b)=>{if(path==='/configuration/devices/ID6/action' && !triggered){triggered=true;throw new Error('activation failed');}if(triggered && path==='/configuration/deviceConfigs/ID6/configurationChanges')throw new Error('recovery unavailable');return request(m,path,b);};
   await assert.rejects(executeTransaction(client,p),e=>{assert.equal(e.rollback.status,'incomplete');assert.ok(e.rollback.devices.some(d=>d.deviceId==='ID8' && d.status==='restored'));assert.ok(e.rollback.errors.length);return true;});
 });
 test('new route associations are compensated and only acquired locks are released',async()=>{

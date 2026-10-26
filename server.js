@@ -216,7 +216,7 @@ const server=createServer(async(req,res)=>{
       await inventory(session,client);
       const plan=await prepare(session,client,input); plan.id=token();plan.input=input;plan.expires=Date.now()+15*60000;plan.digest=digest(plan);
       session.plans.clear();session.plans.set(plan.id,plan);
-      return {...plan,steps:[`Lock and snapshot ${plan.deviceIds.length} target(s); automatically restore changed state if any step fails`,...plan.configurations.map(c=>`${c.deviceId}: ${c.operations.length} ${plan.kind==='delete'?'delete':'add/update'} calls → SaveActivateConfig`),...(plan.routes.length?[`Route set: ${plan.routes.length} entry change(s) → push to all selected groups → verify → commit`]:[])]};
+      return {...plan,steps:[`Lock and snapshot ${plan.deviceIds.length} target(s); automatically restore changed state if any step fails`,...plan.configurations.map(c=>`${c.deviceId}: ${c.operations.flatMap(op=>op.requests || [op]).length} configuration REST writes → SaveActivateConfig if changes exist`),...(plan.routes.length?[`Route set: ${plan.routes.length} entry change(s) → push to all selected groups → verify → commit`]:[])]};
     }));
     if(url.pathname==='/api/apply') {const plan=session.plans.get(input.planId);if(!plan) throw new Error('Generate a preview first');return send(res,202,createJob(session,c=>apply(session,c,plan),{captureChanges:true}));}
     return send(res,404,{error:'Not found'});

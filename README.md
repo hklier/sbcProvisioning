@@ -103,6 +103,12 @@ Preview IDs expire after 15 minutes and can be applied once. Pending SDM configu
 
 Configuration activation and LRT deployment are separate SDM transactions. The application coordinates them with compensating operations and explicit verification, as described below. This version does not implement durable job recovery after a process crash, bulk import or scheduled provisioning.
 
+### Updating objects with child elements
+
+SDM accepts only one object at each level of a configuration update. Version 0.5.1 compiles each logical object update into individual REST requests. Unchanged child collections are omitted. Existing children are updated one branch at a time. A child whose primary key changes (for example a SIP port address, transport or port) is deleted and re-added using its SDM metadata keys and a `parentElement` selector. The parent realm/interface/group is retained. Sending the parent to `/delete` would delete the parent itself, so child deletion always targets the child type directly.
+
+The preview's `requests` array shows the exact writes for each updated object, while `body` shows the desired logical object and `before` retains its original snapshot. These writes remain in the success dialog's filtered REST export. No-op updates issue no configuration writes. Recovery uses the same child-aware planner, checks pending changes before SaveActivateConfig, and verifies the originals even when activation can be skipped. A failed first write therefore does not create a secondary “No user changes found” activation error.
+
 ## Customer deletion and two-target recovery
 
 In **Find existing configuration**, enter an exact OC BGID, OL customer identifier, or numeric OL customer ID. Choose **Delete scope**, then **Preview customer deletion**. Review the per-target object keys, route ranges and before-values. Applying deletion requires the explicit review checkbox. Search results can be broad; deletion resolves exact customer ownership independently of those displayed search results and ignores the Object type search selector.

@@ -18,7 +18,8 @@ test('web API: CSRF, preview/apply, search, OL agents, LRT update and consumed p
   assert.ok(preview.logs.some(l=>l.method==='GET' && l.url.endsWith('/routeSets/')),'every preview refreshes route set versions rather than using cached connection inventory');
   const applied=await run('apply',{planId:preview.result.id});assert.equal(applied.status,'complete',applied.error);assert.equal(applied.result.completed.length,3);assert.ok(applied.logs.some(l=>l.request?.type==='Commit'));assert.ok(applied.logs.some(l=>l.request?.type==='Unlock'));
   assert.deepEqual(applied.result.changeCalls.map(c=>new URL(c.url).pathname.replace('/rest/v1.3','')),[
-    '/configuration/deviceConfigs/ID8/configElements/update','/configuration/deviceConfigs/ID8/configElements/update',
+    '/configuration/deviceConfigs/ID8/configElements/delete','/configuration/deviceConfigs/ID8/configElements/delete',
+    '/configuration/deviceConfigs/ID8/configElements/add','/configuration/deviceConfigs/ID8/configElements/add',
     '/configuration/devices/ID8/action','/routeSets/2/entries/','/routeSets/2/devices/action','/routeSets/routeUpdates/DEMO-UPDATE-2/action'
   ]);
   assert.ok(applied.result.changeCalls.every(c=>c.method==='POST' && c.status>=200 && c.status<300 && Object.hasOwn(c,'response')));

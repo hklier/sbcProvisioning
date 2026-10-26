@@ -30,11 +30,11 @@ function showSuccess(plan,result) {
     for(const op of config.operations) {
       const object=op.body || op.before;
       const key=object.attributes?.find(a=>['id','RealmID','hostname','name'].includes(a.name))?.value || 'customer policy';
-      const verb=op.path.endsWith('/delete')?'Deleted':op.path.endsWith('/add')?'Created':'Updated';
+      const verb=op.requests?.length===0?'Unchanged':op.path.endsWith('/delete')?'Deleted':op.path.endsWith('/add')?'Created':'Updated';
       summary.append(el('div',`${verb} ${labels[object.elementTypePath] || object.elementTypePath} · ${key}`,'plan-step'));
       const sip=sipDetails(object);if(sip)summary.append(el('p',sip,'help'));
     }
-    summary.append(el('p','Configuration saved and activated.','help'));
+    summary.append(el('p',config.operations.flatMap(op=>op.requests || [op]).length?'Configuration saved and activated.':'Configuration already matched. No activation required.','help'));
   }
   if(plan.routes?.length) {
     const set=state.routeSets.find(s=>String(s.routeSetId)===String(plan.routeSetId));
